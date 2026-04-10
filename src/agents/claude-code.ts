@@ -15,7 +15,7 @@ function getConfigPaths(): string[] {
 function getVersion(): string | undefined {
   try {
     const out = execSync('claude --version 2>/dev/null', { timeout: 500, stdio: 'pipe' })
-    return out.toString().trim().split(/\s+/).at(-1)
+    return out.toString().trim().split(/\s+/).at(0)
   } catch {
     return undefined
   }
