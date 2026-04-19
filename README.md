@@ -9,7 +9,7 @@ npx snuf
 ```
 
 <p align="center">
-<img src="docs/screenshot.png" alt="snuf terminal output" width="600">
+<img src="docs/screenshot.gif" alt="snuf terminal demo" width="600">
 </p>
 
 ## What it finds
