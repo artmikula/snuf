@@ -1,27 +1,26 @@
-# snuf demo recording
+# snuf demo recording: run `vhs docs/demo.tape` from the repo root with `snuf` linked globally
 Output docs/screenshot.gif
 
 Set Shell "zsh"
-Set FontSize 14
-Set Width 720
-Set Height 520
+Set FontSize 13
+Set Width 780
+Set Height 800
 Set Theme "Catppuccin Mocha"
-Set Padding 24
+Set Padding 20
 Set TypingSpeed 80ms
 Set PlaybackSpeed 0.85
 
 Hide
-  Type "cd /Users/artm/Code/snuf"
-  Enter
-  Sleep 200ms
   Type "alias npx\ snuf=snuf"
+  Enter
+  Type "clear"
   Enter
   Sleep 200ms
 Show
 
 Sleep 1s
-Type "npx snuf"
+Type "npx snuf --severity medium"
 Sleep 500ms
 Enter
-Sleep 6s
+Sleep 7s
 Sleep 4s

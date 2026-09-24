@@ -26,21 +26,15 @@ snuf/
 │   │   ├── index.ts           # Orchestrator — runs all scanners
 │   │   ├── agents.ts          # Detect installed AI agents
 │   │   ├── mcp.ts             # Scan MCP server configs
-│   │   ├── skills.ts          # Scan Skills directories
+│   │   ├── rules.ts           # Scan rules files, skills, slash commands
 │   │   ├── permissions.ts     # Analyze file/dir access scope
 │   │   ├── secrets.ts         # Find exposed API keys & tokens
-│   │   ├── network.ts         # Check what domains agents can reach
+│   │   ├── secret-patterns.ts # Shared name and value classifier, masking
+│   │   ├── config-parsers.ts  # JSONC, TOML subset, .env parsing
 │   │   └── shell.ts           # Assess shell/command execution access
-│   ├── agents/                # Agent-specific detection adapters
-│   │   ├── claude-code.ts
-│   │   ├── cursor.ts
-│   │   ├── copilot.ts
-│   │   ├── windsurf.ts
-│   │   ├── aider.ts
-│   │   ├── codex.ts
-│   │   ├── openclaw.ts
-│   │   ├── opencode.ts
-│   │   └── gemini-cli.ts
+│   ├── agents/
+│   │   ├── base.ts            # defineAgent factory, version and process detection
+│   │   └── index.ts           # One defineAgent entry per supported agent
 │   ├── reporter/
 │   │   ├── index.ts           # Report orchestrator
 │   │   ├── terminal.ts        # Rich terminal output (chalk/box)
@@ -111,10 +105,15 @@ Parse all MCP config files and report:
 - Remote vs local server
 
 Known config locations:
-- Claude: `~/.claude/claude_desktop_config.json`, `~/.claude.json` (mcpServers key)
-- Cursor: `.cursor/mcp.json`
-- Windsurf: `.windsurf/mcp.json`
-- Generic: `mcp.json` in project root
+- Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `~/.config/Claude/` (Linux), `%APPDATA%\\Claude\\` (Windows)
+- Claude Code: `~/.claude.json` (top level `mcpServers` and `projects[<path>].mcpServers`), project `.mcp.json`
+- Cursor: `~/.cursor/mcp.json`, `.cursor/mcp.json`
+- Windsurf: `~/.codeium/windsurf/mcp_config.json`
+- Codex: `~/.codex/config.toml` (`[mcp_servers.*]`)
+- Gemini CLI: `~/.gemini/settings.json`
+- VS Code / Copilot: `.vscode/mcp.json` (`servers` key), `~/.copilot/mcp-config.json`
+- OpenCode: `~/.config/opencode/opencode.json` (`mcp` key)
+- Full list lives in `mcpConfigSources` in `src/scanner/mcp.ts`
 
 ### 3. Skills & rules
 Scan for:
@@ -161,7 +160,7 @@ Scoring rules:
 - Agent running as root/admin → `critical`
 - No permission model (auto-approve all) → `high`
 
-Overall score: 0-100 (lower is safer)
+Overall score: 0-100 (lower is safer). Findings combine multiplicatively (each finding removes a fraction of the remaining safety) so the score never saturates on a single critical.
 - 0-20: Clean — minimal exposure
 - 21-40: Caution — some permissions to review
 - 41-60: Warning — significant attack surface

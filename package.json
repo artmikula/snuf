@@ -1,22 +1,45 @@
 {
   "name": "snuf",
   "version": "0.1.0",
-  "description": "Sniff out what AI agents can do on your machine",
+  "description": "Sniff out what AI agents can reach on your machine. Agents, MCP servers, exposed secrets, file access, shell permissions. One command, zero network calls.",
   "type": "module",
   "bin": {
     "snuf": "./dist/cli.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/",
-    "prepublishOnly": "pnpm build"
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
   },
-  "keywords": ["ai", "security", "agent", "mcp", "audit", "claude", "cursor", "copilot", "devtools", "cli"],
-  "author": "Aso",
+  "keywords": [
+    "ai",
+    "security",
+    "agent",
+    "mcp",
+    "audit",
+    "claude",
+    "claude-code",
+    "cursor",
+    "copilot",
+    "codex",
+    "windsurf",
+    "gemini-cli",
+    "openclaw",
+    "devtools",
+    "cli",
+    "secrets",
+    "scanner"
+  ],
+  "author": "Art <contact@centipede.dev> (https://centipede.dev)",
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -37,5 +60,13 @@
     "tsup": "^8.5.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artmikula/snuf.git"
+  },
+  "homepage": "https://github.com/artmikula/snuf#readme",
+  "bugs": {
+    "url": "https://github.com/artmikula/snuf/issues"
   }
 }

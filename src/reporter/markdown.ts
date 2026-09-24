@@ -1,127 +1,84 @@
-import type { ScanResult, ScanOptions, Finding } from '../types.js'
+import type { ScanResult, ScanOptions, Finding, Severity } from '../types.js'
 import { scoreBand } from '../scoring/risk.js'
+import { visibleFindings, countBySeverity, mcpFlags, recommendations } from './shared.js'
 
-function severityBadge(severity: Finding['severity']): string {
-  const map: Record<string, string> = {
-    critical: '🔴 CRITICAL',
-    high: '🟠 HIGH',
-    medium: '🟡 MEDIUM',
-    low: '🔵 LOW',
-    info: '⚪ INFO',
+const BADGE: Record<Severity, string> = {
+  critical: '🔴 Critical',
+  high: '🟠 High',
+  medium: '🟡 Medium',
+  low: '🔵 Low',
+  info: '⚪ Info',
+}
+
+function esc(s: string): string {
+  return s.replace(/[|]/g, '\\|')
+}
+
+function section(lines: string[], title: string, findings: Finding[], home: string): void {
+  if (findings.length === 0) return
+  lines.push(`### ${title} (${findings.length})`)
+  lines.push('')
+  for (const f of findings) {
+    lines.push(`- **${BADGE[f.severity]}** ${esc(f.title)}  `)
+    lines.push(`  ${esc(f.detail)}${f.path ? ` \`${f.path.replace(home, '~')}\`` : ''}`)
   }
-  return map[severity] ?? severity.toUpperCase()
+  lines.push('')
 }
 
-function escapeMarkdown(s: string): string {
-  return s.replace(/[|`]/g, '\\$&')
-}
-
-export function renderMarkdown(result: ScanResult, options: ScanOptions): string {
+export function renderMarkdown(result: ScanResult, options: ScanOptions, home: string): string {
   const lines: string[] = []
   const date = new Date(result.scannedAt).toUTCString()
+  const findings = visibleFindings(result, options.severity)
+  const counts = countBySeverity(result.findings)
 
-  lines.push('# snuf — AI Agent Security Report')
+  lines.push('# snuf report')
   lines.push('')
-  lines.push(`**Score:** ${result.score}/100 — ${scoreBand(result.score)}`)
-  lines.push(`**Scanned:** ${date}`)
-  lines.push(`**Platform:** ${result.platform}`)
-  lines.push('')
-  lines.push('---')
+  lines.push(`**Score:** ${result.score}/100 (${scoreBand(result.score)})  `)
+  lines.push(`**Findings:** ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low  `)
+  lines.push(`**Scanned:** ${date} on ${result.platform}, project \`${result.projectDir.replace(home, '~')}\`  `)
+  lines.push(`**snuf:** v${result.version}, zero network calls, read only`)
   lines.push('')
 
-  // Agents
-  lines.push(`## Agents Found (${result.agents.length})`)
+  lines.push(`## Agents (${result.agents.length})`)
   lines.push('')
   if (result.agents.length === 0) {
-    lines.push('_No AI agents detected._')
+    lines.push('No AI coding agents detected.')
   } else {
-    lines.push('| Agent | Version | Status | Config Paths |')
-    lines.push('|-------|---------|--------|--------------|')
-    for (const agent of result.agents) {
-      const version = agent.version ?? '—'
-      const status = agent.running ? '✅ running' : '○ not running'
-      const paths = agent.configPaths.map((p) => `\`${escapeMarkdown(p)}\``).join(', ')
-      lines.push(`| ${agent.name} | ${version} | ${status} | ${paths} |`)
+    lines.push('| Agent | Version | Running | Config |')
+    lines.push('|---|---|---|---|')
+    for (const a of result.agents) {
+      lines.push(`| ${a.name} | ${a.version ?? ''} | ${a.running ? 'yes' : 'no'} | ${a.configPaths.map((p) => `\`${p.replace(home, '~')}\``).join('<br>')} |`)
     }
   }
   lines.push('')
 
-  // MCP Servers
-  lines.push(`## MCP Servers (${result.mcpServers.length})`)
+  lines.push(`## MCP servers (${result.mcpServers.length})`)
   lines.push('')
   if (result.mcpServers.length === 0) {
-    lines.push('_No MCP servers configured._')
+    lines.push('No MCP servers configured.')
   } else {
-    lines.push('| Server | Source | Transport | Known | Shell | Network | Env Vars |')
-    lines.push('|--------|--------|-----------|-------|-------|---------|----------|')
-    for (const server of result.mcpServers) {
-      const known = server.isKnown ? '✅' : '⚠️'
-      const shell = server.hasShellAccess ? '⚠️ yes' : 'no'
-      const network = server.hasNetworkAccess ? '⚠️ yes' : 'no'
-      const envCount = server.envVars ? Object.keys(server.envVars).length : 0
-      const envCell = envCount > 0 ? `⚠️ ${envCount} var${envCount > 1 ? 's' : ''}` : 'no'
-      lines.push(
-        `| \`${server.name}\` | ${server.source} | ${server.transport} | ${known} | ${shell} | ${network} | ${envCell} |`
-      )
+    lines.push('| Server | Agent | Source | Runs | Flags |')
+    lines.push('|---|---|---|---|---|')
+    for (const s of result.mcpServers) {
+      const runs = s.command ? `\`${esc([s.command, ...(s.args ?? [])].join(' ')).slice(0, 80)}\`` : s.url ? esc(s.url) : ''
+      lines.push(`| ${esc(s.name)} | ${s.agent} | ${esc(s.source)} | ${runs} | ${mcpFlags(s).join(', ')} |`)
     }
   }
   lines.push('')
 
-  // Findings
-  const severityOrder: Finding['severity'][] = ['critical', 'high', 'medium', 'low', 'info']
-  const minIdx = options.severity
-    ? severityOrder.indexOf(options.severity as Finding['severity'])
-    : severityOrder.length - 1
-  const visibleFindings = result.findings.filter(
-    (f) => severityOrder.indexOf(f.severity) <= minIdx
-  )
-
-  lines.push(`## Findings (${visibleFindings.length})`)
+  lines.push(`## Findings (${findings.length})`)
   lines.push('')
-  if (visibleFindings.length === 0) {
-    lines.push('_No findings for the selected severity threshold._')
-  } else {
-    // Group by severity
-    for (const severity of severityOrder) {
-      const group = visibleFindings.filter((f) => f.severity === severity)
-      if (group.length === 0) continue
-      lines.push(`### ${severityBadge(severity)} (${group.length})`)
-      lines.push('')
-      for (const finding of group) {
-        lines.push(`#### ${escapeMarkdown(finding.title)}`)
-        lines.push('')
-        lines.push(`- **Category:** ${finding.category}`)
-        if (finding.agent) lines.push(`- **Agent:** ${finding.agent}`)
-        if (finding.path) lines.push(`- **Path:** \`${escapeMarkdown(finding.path)}\``)
-        lines.push(`- **Detail:** ${escapeMarkdown(finding.detail)}`)
-        lines.push('')
-      }
-    }
-  }
+  if (findings.length === 0) lines.push('No findings at the selected severity.')
+  section(lines, 'Secrets', findings.filter((f) => f.category === 'secret'), home)
+  section(lines, 'MCP servers', findings.filter((f) => f.category === 'mcp'), home)
+  section(lines, 'Shell and permissions', findings.filter((f) => f.category === 'shell'), home)
+  section(lines, 'File access', findings.filter((f) => f.category === 'file-access'), home)
+  section(lines, 'Rules and skills', findings.filter((f) => f.category === 'rules'), home)
 
-  // Recommendations
   lines.push('## Recommendations')
   lines.push('')
-  const criticalAndHigh = result.findings.filter(
-    (f) => f.severity === 'critical' || f.severity === 'high'
-  )
-  if (criticalAndHigh.length > 0) {
-    lines.push(`1. **Immediate action required:** ${criticalAndHigh.length} critical/high finding(s) need attention`)
-  }
-  const mcpWithEnv = result.mcpServers.filter(
-    (s) => s.envVars && Object.keys(s.envVars).length > 0
-  )
-  if (mcpWithEnv.length > 0) {
-    lines.push('2. Move API keys from MCP configs to a proper secrets manager')
-  }
-  const unknownMcp = result.mcpServers.filter((s) => !s.isKnown)
-  if (unknownMcp.length > 0) {
-    lines.push(`3. Audit unknown MCP servers: ${unknownMcp.map((s) => s.name).join(', ')}`)
-  }
+  recommendations(result).forEach((r, i) => lines.push(`${i + 1}. ${r}`))
   lines.push('')
-  lines.push('---')
-  lines.push('')
-  lines.push(`_Generated by [snuf](https://github.com/artmikula/snuf) on ${date}_`)
-
+  lines.push(`_Generated by [snuf](https://github.com/artmikula/snuf) v${result.version}._`)
   return lines.join('\n')
 }

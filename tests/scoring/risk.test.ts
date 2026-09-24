@@ -1,75 +1,59 @@
 import { describe, it, expect } from 'vitest'
-import { calculateScore, scoreBand } from '../../src/scoring/risk.js'
-import type { Finding, Agent, McpServer } from '../../src/types.js'
+import { calculateScore, scoreBand, sortFindings } from '../../src/scoring/risk.js'
+import type { Finding, Severity } from '../../src/types.js'
 
-const noAgents: Agent[] = []
-const noMcp: McpServer[] = []
+const f = (severity: Severity): Finding => ({ category: 'mcp', severity, title: 't', detail: 'd' })
 
 describe('calculateScore', () => {
-  it('returns 0 for no findings', () => {
-    expect(calculateScore([], noAgents, noMcp)).toBe(0)
+  it('is 0 with no findings', () => {
+    expect(calculateScore([])).toBe(0)
   })
 
-  it('scores info findings as 0', () => {
-    const findings: Finding[] = [
-      { category: 'agent', severity: 'info', title: 'x', detail: 'x' },
-    ]
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(0)
+  it('ignores info findings', () => {
+    expect(calculateScore([f('info'), f('info')])).toBe(0)
   })
 
-  it('scores low as 5', () => {
-    const findings: Finding[] = [
-      { category: 'mcp', severity: 'low', title: 'x', detail: 'x' },
-    ]
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(5)
+  it('does not saturate on a single critical', () => {
+    const one = calculateScore([f('critical')])
+    expect(one).toBeGreaterThan(30)
+    expect(one).toBeLessThan(50)
   })
 
-  it('scores medium as 15', () => {
-    const findings: Finding[] = [
-      { category: 'mcp', severity: 'medium', title: 'x', detail: 'x' },
-    ]
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(15)
+  it('grows with more findings but stays under 100', () => {
+    const a = calculateScore([f('high')])
+    const b = calculateScore([f('high'), f('high')])
+    const c = calculateScore(Array.from({ length: 20 }, () => f('critical')))
+    expect(b).toBeGreaterThan(a)
+    expect(c).toBeLessThanOrEqual(100)
   })
 
-  it('scores high as 30', () => {
-    const findings: Finding[] = [
-      { category: 'mcp', severity: 'high', title: 'x', detail: 'x' },
-    ]
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(30)
+  it('ranks a typical clean laptop as clean or caution', () => {
+    expect(calculateScore([f('low'), f('low'), f('medium'), f('info')])).toBeLessThanOrEqual(20)
   })
 
-  it('scores critical as 50', () => {
-    const findings: Finding[] = [
-      { category: 'mcp', severity: 'critical', title: 'x', detail: 'x' },
-    ]
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(50)
-  })
-
-  it('is additive across multiple findings', () => {
-    const findings: Finding[] = [
-      { category: 'mcp', severity: 'medium', title: 'x', detail: 'x' },
-      { category: 'mcp', severity: 'high', title: 'x', detail: 'x' },
-    ]
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(45)
-  })
-
-  it('caps at 100', () => {
-    const findings: Finding[] = Array(5).fill(
-      { category: 'mcp', severity: 'critical', title: 'x', detail: 'x' }
-    )
-    expect(calculateScore(findings, noAgents, noMcp)).toBe(100)
+  it('ranks bypass mode plus exposed keys as danger or critical', () => {
+    expect(calculateScore([f('critical'), f('critical'), f('high'), f('high'), f('medium')])).toBeGreaterThan(60)
   })
 })
 
 describe('scoreBand', () => {
-  it('0 is Clean', () => expect(scoreBand(0)).toBe('Clean'))
-  it('20 is Clean', () => expect(scoreBand(20)).toBe('Clean'))
-  it('21 is Caution', () => expect(scoreBand(21)).toBe('Caution'))
-  it('40 is Caution', () => expect(scoreBand(40)).toBe('Caution'))
-  it('41 is Warning', () => expect(scoreBand(41)).toBe('Warning'))
-  it('60 is Warning', () => expect(scoreBand(60)).toBe('Warning'))
-  it('61 is Danger', () => expect(scoreBand(61)).toBe('Danger'))
-  it('80 is Danger', () => expect(scoreBand(80)).toBe('Danger'))
-  it('81 is Critical', () => expect(scoreBand(81)).toBe('Critical'))
-  it('100 is Critical', () => expect(scoreBand(100)).toBe('Critical'))
+  it('maps boundaries', () => {
+    expect(scoreBand(0)).toBe('Clean')
+    expect(scoreBand(20)).toBe('Clean')
+    expect(scoreBand(21)).toBe('Caution')
+    expect(scoreBand(40)).toBe('Caution')
+    expect(scoreBand(41)).toBe('Warning')
+    expect(scoreBand(60)).toBe('Warning')
+    expect(scoreBand(61)).toBe('Danger')
+    expect(scoreBand(80)).toBe('Danger')
+    expect(scoreBand(81)).toBe('Critical')
+    expect(scoreBand(100)).toBe('Critical')
+  })
+})
+
+describe('sortFindings', () => {
+  it('orders most severe first', () => {
+    const sorted = sortFindings([f('low'), f('critical'), f('medium'), f('high'), f('info')])
+    expect(sorted.map((x) => x.severity)).toEqual(['critical', 'high', 'medium', 'low', 'info'])
+  })
 })

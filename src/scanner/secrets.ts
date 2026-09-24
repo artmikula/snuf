@@ -1,134 +1,146 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Agent, McpServer, Finding } from '../types.js'
+import type { Finding, McpServer, ScanContext } from '../types.js'
+import { readJson, readText, parseEnvFile, walkStrings } from './config-parsers.js'
+import { classifySecret, classifyValue } from './secret-patterns.js'
 
-const SECRET_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /ANTHROPIC_API_KEY/i, label: 'Anthropic API key' },
-  { pattern: /OPENAI_API_KEY/i, label: 'OpenAI API key' },
-  { pattern: /OPENAI_ORG/i, label: 'OpenAI org ID' },
-  { pattern: /GITHUB_TOKEN/i, label: 'GitHub token' },
-  { pattern: /GH_TOKEN/i, label: 'GitHub token' },
-  { pattern: /AWS_ACCESS_KEY_ID/i, label: 'AWS access key' },
-  { pattern: /AWS_SECRET_ACCESS_KEY/i, label: 'AWS secret key' },
-  { pattern: /AWS_SESSION_TOKEN/i, label: 'AWS session token' },
-  { pattern: /GOOGLE_API_KEY/i, label: 'Google API key' },
-  { pattern: /GCLOUD_SERVICE_KEY/i, label: 'GCloud service key' },
-  { pattern: /DATABASE_URL/i, label: 'Database URL' },
-  { pattern: /POSTGRES_URL/i, label: 'Postgres URL' },
-  { pattern: /MYSQL_URL/i, label: 'MySQL URL' },
-  { pattern: /MONGODB_URI/i, label: 'MongoDB URI' },
-  { pattern: /REDIS_URL/i, label: 'Redis URL' },
-  { pattern: /STRIPE_SECRET_KEY/i, label: 'Stripe secret key' },
-  { pattern: /STRIPE_API_KEY/i, label: 'Stripe API key' },
-  { pattern: /SLACK_TOKEN/i, label: 'Slack token' },
-  { pattern: /SLACK_BOT_TOKEN/i, label: 'Slack bot token' },
-  { pattern: /DISCORD_TOKEN/i, label: 'Discord token' },
-  { pattern: /HUGGINGFACE_TOKEN/i, label: 'HuggingFace token' },
-  { pattern: /HF_TOKEN/i, label: 'HuggingFace token' },
-  { pattern: /REPLICATE_API_KEY/i, label: 'Replicate API key' },
-  { pattern: /GROQ_API_KEY/i, label: 'Groq API key' },
-  { pattern: /MISTRAL_API_KEY/i, label: 'Mistral API key' },
-  { pattern: /COHERE_API_KEY/i, label: 'Cohere API key' },
-  { pattern: /TOGETHER_API_KEY/i, label: 'Together API key' },
-  { pattern: /NPM_TOKEN/i, label: 'npm token' },
-  { pattern: /PYPI_TOKEN/i, label: 'PyPI token' },
-  { pattern: /DOCKER_PASSWORD/i, label: 'Docker password' },
-  { pattern: /SECRET_KEY/i, label: 'Secret key' },
-  { pattern: /API_SECRET/i, label: 'API secret' },
-  { pattern: /PRIVATE_KEY/i, label: 'Private key' },
-  { pattern: /ENCRYPTION_KEY/i, label: 'Encryption key' },
-]
-
-function matchSecretKey(key: string): string | undefined {
-  for (const { pattern, label } of SECRET_PATTERNS) {
-    if (pattern.test(key)) return label
-  }
-  return undefined
+interface CredentialStore {
+  path: string
+  agent: string
+  label: string
 }
 
-function parseEnvFile(filePath: string): Record<string, string> {
-  const result: Record<string, string> = {}
-  try {
-    const content = readFileSync(filePath, 'utf-8')
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const eq = trimmed.indexOf('=')
-      if (eq === -1) continue
-      const key = trimmed.slice(0, eq).trim()
-      result[key] = trimmed.slice(eq + 1).trim()
-    }
-  } catch {
-    // unreadable — skip
-  }
-  return result
-}
-
-export async function scanSecrets(
-  agents: Agent[],
-  mcpServers: McpServer[]
-): Promise<Finding[]> {
-  const findings: Finding[] = []
-  const home = homedir()
-
-  // 1. Scan MCP server env vars
-  for (const server of mcpServers) {
-    if (!server.envVars) continue
-    for (const [key] of Object.entries(server.envVars)) {
-      const label = matchSecretKey(key)
-      if (label) {
-        findings.push({
-          category: 'secret',
-          severity: 'critical',
-          title: `${label} exposed in MCP config`,
-          detail: `${key} is set in MCP server "${server.name}" (${server.source})`,
-          agent: server.source,
-        })
-      }
-    }
-  }
-
-  // 2. Scan process.env for secrets inherited by all agents
-  if (agents.length > 0) {
-    for (const [key] of Object.entries(process.env)) {
-      const label = matchSecretKey(key)
-      if (label) {
-        findings.push({
-          category: 'secret',
-          severity: 'high',
-          title: `${label} in environment (inherited by all agents)`,
-          detail: `${key} is set in the shell environment and inherited by every AI agent process`,
-        })
-      }
-    }
-  }
-
-  // 3. Scan .env files in agent config directories and common project locations
-  const envLocations: Array<[string, string]> = [
-    [join(home, '.env'), 'home directory'],
-    [join(process.cwd(), '.env'), 'project root'],
-    [join(process.cwd(), '.env.local'), 'project root'],
-    [join(process.cwd(), '.env.development'), 'project root'],
-    [join(process.cwd(), '.env.production'), 'project root'],
+function credentialStores(home: string): CredentialStore[] {
+  const local = process.platform === 'win32' ? join(home, 'AppData', 'Local') : join(home, '.local', 'share')
+  return [
+    { path: join(home, '.claude', '.credentials.json'), agent: 'claude-code', label: 'Claude Code OAuth credentials' },
+    { path: join(home, '.codex', 'auth.json'), agent: 'codex', label: 'Codex CLI auth tokens' },
+    { path: join(home, '.gemini', 'oauth_creds.json'), agent: 'gemini-cli', label: 'Gemini CLI OAuth credentials' },
+    { path: join(home, '.config', 'github-copilot', 'hosts.json'), agent: 'copilot', label: 'GitHub Copilot OAuth token' },
+    { path: join(home, '.config', 'github-copilot', 'apps.json'), agent: 'copilot', label: 'GitHub Copilot OAuth token' },
+    { path: join(local, 'opencode', 'auth.json'), agent: 'opencode', label: 'OpenCode auth tokens' },
+    { path: join(home, '.openclaw', 'credentials'), agent: 'openclaw', label: 'OpenClaw credential store' },
+    { path: join(home, '.qwen', 'oauth_creds.json'), agent: 'qwen-code', label: 'Qwen Code OAuth credentials' },
   ]
+}
 
-  for (const [filePath, location] of envLocations) {
-    if (!existsSync(filePath)) continue
-    const vars = parseEnvFile(filePath)
-    for (const key of Object.keys(vars)) {
-      const label = matchSecretKey(key)
-      if (label) {
-        findings.push({
-          category: 'secret',
-          severity: 'high',
-          title: `${label} in .env file`,
-          detail: `${key} found in .env file at ${location} (${filePath})`,
-          path: filePath,
-        })
-      }
+function stateFiles(home: string): CredentialStore[] {
+  return [
+    { path: join(home, '.claude.json'), agent: 'claude-code', label: '~/.claude.json' },
+    { path: join(home, '.openclaw', 'openclaw.json'), agent: 'openclaw', label: '~/.openclaw/openclaw.json' },
+    { path: join(home, '.config', 'amp', 'settings.json'), agent: 'amp', label: 'Amp settings' },
+    { path: join(home, '.continue', 'config.json'), agent: 'continue', label: 'Continue config' },
+    { path: join(home, '.config', 'zed', 'settings.json'), agent: 'zed', label: 'Zed settings' },
+  ]
+}
+
+function mcpSecretFindings(servers: McpServer[]): Finding[] {
+  const findings: Finding[] = []
+  for (const server of servers) {
+    for (const key of server.secretKeys) {
+      const isHeader = key.startsWith('header:')
+      const name = isHeader ? key.slice(7) : key
+      findings.push({
+        category: 'secret',
+        severity: 'critical',
+        title: `${name} stored in plaintext in MCP config (${server.name})`,
+        detail: isHeader
+          ? `The ${name} header for "${server.name}" is written into ${server.source}. Every agent and MCP server that reads this file gets it.`
+          : `${name} is passed to "${server.name}" through ${server.source}. Every agent and MCP server that reads this file gets it, and the server process receives it in the clear.`,
+        agent: server.agent,
+      })
     }
   }
-
   return findings
+}
+
+function environmentFindings(agents: ScanContext['agents']): Finding[] {
+  if (agents.length === 0) return []
+  const findings: Finding[] = []
+  for (const [key, value] of Object.entries(process.env)) {
+    const match = classifySecret(key, value)
+    if (!match) continue
+    findings.push({
+      category: 'secret',
+      severity: 'high',
+      title: `${key} is exported in your shell environment`,
+      detail: `${match.label} inherited by every AI agent, MCP server, and subprocess you launch from this shell. Move it into a per-project env file or a secrets manager.`,
+    })
+  }
+  return findings
+}
+
+function envFileFindings(home: string, project: string): Finding[] {
+  const findings: Finding[] = []
+  const candidates = [
+    join(home, '.env'),
+    ...['.env', '.env.local', '.env.development', '.env.production', '.env.staging'].map((f) => join(project, f)),
+  ]
+  for (const path of candidates) {
+    if (!existsSync(path)) continue
+    const text = readText(path)
+    if (text === undefined) continue
+    const vars = parseEnvFile(text)
+    const hits = Object.entries(vars)
+      .map(([k, v]) => ({ key: k, match: classifySecret(k, v) }))
+      .filter((h) => h.match)
+    if (hits.length === 0) continue
+    const inHome = path.startsWith(home) && !path.startsWith(project)
+    findings.push({
+      category: 'secret',
+      severity: inHome || hits.length >= 3 ? 'high' : 'medium',
+      title: `${hits.length} credential${hits.length > 1 ? 's' : ''} in ${path.replace(home, '~')}`,
+      detail: `${hits.map((h) => h.key).join(', ')}. Any agent working in this directory can read this file, and most will, since .env files are rarely in their deny lists.`,
+      path,
+    })
+  }
+  return findings
+}
+
+function credentialStoreFindings(home: string, agents: ScanContext['agents']): Finding[] {
+  const findings: Finding[] = []
+  const slugs = new Set(agents.map((a) => a.slug))
+  for (const store of credentialStores(home)) {
+    if (!existsSync(store.path)) continue
+    if (agents.length > 0 && !slugs.has(store.agent)) continue
+    findings.push({
+      category: 'secret',
+      severity: 'high',
+      title: `${store.label} stored in plaintext`,
+      detail: `${store.path.replace(home, '~')} holds long lived tokens on disk. Any other agent, MCP server, or npm postinstall script running as you can read and reuse them.`,
+      path: store.path,
+      agent: store.agent,
+    })
+  }
+  for (const file of stateFiles(home)) {
+    if (!existsSync(file.path)) continue
+    if (agents.length > 0 && !slugs.has(file.agent)) continue
+    const json = readJson(file.path)
+    if (json === undefined) continue
+    const hits: string[] = []
+    walkStrings(json, (path, value) => {
+      if (/mcpServers|env\./.test(path)) return
+      const match = classifyValue(value)
+      if (match) hits.push(`${path} (${match.label})`)
+    })
+    if (hits.length === 0) continue
+    findings.push({
+      category: 'secret',
+      severity: 'high',
+      title: `Plaintext token${hits.length > 1 ? 's' : ''} inside ${file.label}`,
+      detail: `${hits.slice(0, 5).join('; ')}${hits.length > 5 ? ` and ${hits.length - 5} more` : ''}. This file is world readable to every process running as you.`,
+      path: file.path,
+      agent: file.agent,
+    })
+  }
+  return findings
+}
+
+export async function scanSecrets(ctx: ScanContext, servers: McpServer[]): Promise<Finding[]> {
+  return [
+    ...mcpSecretFindings(servers),
+    ...environmentFindings(ctx.agents),
+    ...envFileFindings(ctx.home, ctx.project),
+    ...credentialStoreFindings(ctx.home, ctx.agents),
+  ]
 }

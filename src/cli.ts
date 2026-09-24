@@ -1,53 +1,53 @@
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { runScan } from './scanner/index.js'
 import { renderTerminal } from './reporter/terminal.js'
 import { renderMarkdown } from './reporter/markdown.js'
 import { renderJson } from './reporter/json.js'
-import type { ScanOptions } from './types.js'
+import { severityRank } from './scoring/risk.js'
+import { AGENT_SLUGS } from './agents/index.js'
+import { VERSION } from './version.js'
+import { SEVERITIES, type ScanOptions, type OutputFormat } from './types.js'
 
 const program = new Command()
 
 program
   .name('snuf')
-  .description('Sniff out what AI agents can do on your machine')
-  .version('0.1.0')
-  .option('--format <type>', 'Output format: terminal, json, markdown', 'terminal')
-  .option('--output <path>', 'Save report to file')
-  .option('--agent <name>', 'Scan specific agent only (e.g. claude-code, cursor)')
-  .option('--severity <level>', 'Minimum severity: info, low, medium, high, critical')
-  .option('--quick', 'Just show the score')
-  .option('--project <path>', 'Scan a specific project directory')
+  .description('Sniff out what AI agents can reach on your machine. Read only, zero network calls.')
+  .version(VERSION)
+  .addOption(new Option('--format <type>', 'output format').choices(['terminal', 'json', 'markdown']).default('terminal'))
+  .option('--output <path>', 'write the report to a file (json or markdown, inferred from extension)')
+  .addOption(new Option('--agent <slug>', 'scan one agent only').choices(AGENT_SLUGS))
+  .addOption(new Option('--severity <level>', 'hide findings below this level').choices(SEVERITIES))
+  .option('--quick', 'print only the score')
+  .option('--project <path>', 'project directory to scan (default: current directory)')
+  .addOption(new Option('--fail-on <level>', 'exit 1 if any finding is at or above this level').choices(SEVERITIES))
   .action(async (options: ScanOptions) => {
-    const results = await runScan(options)
+    const home = homedir()
+    const result = await runScan(options)
 
-    if (options.format === 'json') {
-      const output = renderJson(results)
-      if (options.output) {
-        writeFileSync(options.output, output)
-        console.log(`Report saved to ${options.output}`)
-      } else {
-        console.log(output)
-      }
-      return
-    }
-
-    if (options.format === 'markdown') {
-      const output = renderMarkdown(results, options)
-      if (options.output) {
-        writeFileSync(options.output, output)
-        console.log(`Report saved to ${options.output}`)
-      } else {
-        console.log(output)
-      }
-      return
-    }
-
-    // default: terminal
-    renderTerminal(results, options)
+    let fileFormat: OutputFormat | undefined
     if (options.output) {
-      console.log(`Note: --output only writes content for --format json or --format markdown`)
+      fileFormat = options.format !== 'terminal' ? options.format : options.output.endsWith('.json') ? 'json' : 'markdown'
+      const content = fileFormat === 'json' ? renderJson(result, options) : renderMarkdown(result, options, home)
+      writeFileSync(options.output, content + '\n')
+    }
+
+    if (options.format === 'json' && !options.output) console.log(renderJson(result, options))
+    else if (options.format === 'markdown' && !options.output) console.log(renderMarkdown(result, options, home))
+    else if (options.format === 'terminal') console.log(renderTerminal(result, options, home))
+    if (options.output) console.error(`Report written to ${options.output}`)
+
+    if (options.failOn) {
+      const threshold = severityRank(options.failOn)
+      const hit = result.findings.some((f) => severityRank(f.severity) >= threshold)
+      if (hit) process.exitCode = 1
     }
   })
 
-program.parse()
+program.parseAsync().catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err)
+  console.error(`snuf failed: ${message}`)
+  process.exitCode = 1
+})

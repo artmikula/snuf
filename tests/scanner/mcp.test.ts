@@ -1,125 +1,146 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-vi.mock('node:fs', () => ({
-  existsSync: vi.fn(),
-  readFileSync: vi.fn(),
-}))
-
-vi.mock('node:os', () => ({
-  homedir: vi.fn(() => '/home/testuser'),
-}))
-
+import { describe, it, expect, afterEach } from 'vitest'
 import { scanMcpServers } from '../../src/scanner/mcp.js'
-import { existsSync } from 'node:fs'
-import { readFileSync } from 'node:fs'
+import { sandbox, type Sandbox } from '../helpers.js'
 
-const KNOWN_CONFIG = JSON.stringify({
-  mcpServers: {
-    filesystem: {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/home/user'],
-      env: {}
-    },
-    github: {
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-github'],
-      env: { GITHUB_TOKEN: 'ghp_test' }
-    }
-  }
-})
-
-const UNKNOWN_CONFIG = JSON.stringify({
-  mcpServers: {
-    'my-custom-server': {
-      command: '/usr/local/bin/my-custom-binary',
-      args: ['--serve'],
-      env: {}
-    }
-  }
-})
-
-const CRITICAL_CONFIG = JSON.stringify({
-  mcpServers: {
-    'sketchy-mcp': {
-      command: 'npx',
-      args: ['-y', 'sketchy-package'],
-      url: 'https://remote.example.com',
-      env: { SECRET_KEY: 'abc123' }
-    }
-  }
-})
+let box: Sandbox
+afterEach(() => box?.cleanup())
 
 describe('scanMcpServers', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    vi.mocked(existsSync).mockReturnValue(false)
+  it('returns nothing when no config files exist', async () => {
+    box = sandbox()
+    const { servers, findings } = await scanMcpServers(box.ctx())
+    expect(servers).toEqual([])
+    expect(findings).toEqual([])
   })
 
-  it('returns empty arrays when no config files exist', async () => {
-    const { servers, findings } = await scanMcpServers([], {})
-    expect(servers).toHaveLength(0)
-    expect(findings).toHaveLength(0)
-  })
-
-  it('parses known MCP servers correctly', async () => {
-    vi.mocked(existsSync).mockImplementation(
-      (p) => p === '/home/testuser/.claude/claude_desktop_config.json'
-    )
-    vi.mocked(readFileSync).mockReturnValue(KNOWN_CONFIG)
-
-    const { servers, findings } = await scanMcpServers([], {})
-    expect(servers).toHaveLength(2)
-    expect(servers[0].name).toBe('filesystem')
-    expect(servers[0].isKnown).toBe(true)
-    expect(servers[0].hasShellAccess).toBe(true)
-    expect(servers[0].transport).toBe('stdio')
-    expect(findings).toHaveLength(0)
-  })
-
-  it('flags unknown server as medium finding', async () => {
-    vi.mocked(existsSync).mockImplementation(
-      (p) => p === '/home/testuser/.cursor/mcp.json'
-    )
-    vi.mocked(readFileSync).mockReturnValue(UNKNOWN_CONFIG)
-
-    const { servers, findings } = await scanMcpServers([], {})
+  it('reads Claude Desktop config from Application Support on macOS', async () => {
+    box = sandbox()
+    const rel = process.platform === 'darwin' ? 'home/Library/Application Support/Claude/claude_desktop_config.json' : 'home/.config/Claude/claude_desktop_config.json'
+    box.write(rel, JSON.stringify({ mcpServers: { fs: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'] } } }))
+    const { servers, findings } = await scanMcpServers(box.ctx())
     expect(servers).toHaveLength(1)
-    expect(servers[0].isKnown).toBe(false)
-    expect(findings).toHaveLength(1)
-    expect(findings[0].severity).toBe('medium')
-    expect(findings[0].category).toBe('mcp')
+    expect(servers[0]!.agent).toBe('claude-desktop')
+    expect(servers[0]!.isKnown).toBe(true)
+    expect(findings).toEqual([])
   })
 
-  it('flags unknown server with network+shell+env as critical finding', async () => {
-    vi.mocked(existsSync).mockImplementation(
-      (p) => p === '/home/testuser/.claude/claude_desktop_config.json'
-    )
-    vi.mocked(readFileSync).mockReturnValue(CRITICAL_CONFIG)
-
-    const { servers, findings } = await scanMcpServers([], {})
-    expect(servers[0].hasNetworkAccess).toBe(true)
-    expect(servers[0].hasShellAccess).toBe(true)
-    expect(findings[0].severity).toBe('critical')
+  it('reads project scoped servers nested under projects in ~/.claude.json', async () => {
+    box = sandbox()
+    box.write('home/.claude.json', JSON.stringify({
+      mcpServers: { top: { command: 'npx', args: ['-y', 'some-random-mcp'] } },
+      projects: { '/repo': { mcpServers: { nested: { command: 'uvx', args: ['other-thing'] } } } },
+    }))
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers.map((s) => s.name)).toEqual(['top', 'nested (/repo)'])
+    expect(servers[0]!.isKnown).toBe(false)
   })
 
-  it('silently skips files with invalid JSON', async () => {
-    vi.mocked(existsSync).mockImplementation(
-      (p) => p === '/home/testuser/.claude/claude_desktop_config.json'
-    )
-    vi.mocked(readFileSync).mockReturnValue('{ invalid json }}}')
-
-    const { servers, findings } = await scanMcpServers([], {})
-    expect(servers).toHaveLength(0)
-    expect(findings).toHaveLength(0)
+  it('reads project .mcp.json for Claude Code', async () => {
+    box = sandbox()
+    box.write('home/work/app/.mcp.json', JSON.stringify({ mcpServers: { remote: { url: 'https://example.com/mcp' } } }))
+    const { servers, findings } = await scanMcpServers(box.ctx())
+    expect(servers[0]!.transport).toBe('http')
+    expect(servers[0]!.hasNetworkAccess).toBe(true)
+    expect(findings).toEqual([])
   })
 
-  it('attaches source label to each server', async () => {
-    vi.mocked(existsSync).mockImplementation(
-      (p) => p === '/home/testuser/.cursor/mcp.json'
-    )
-    vi.mocked(readFileSync).mockReturnValue(UNKNOWN_CONFIG)
+  it('parses Codex config.toml mcp_servers tables', async () => {
+    box = sandbox()
+    box.write('home/.codex/config.toml', `
+model = "gpt-5"
+approval_policy = "on-request"
 
-    const { servers } = await scanMcpServers([], {})
-    expect(servers[0].source).toBe('cursor')
+[mcp_servers.github]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[mcp_servers.github.env]
+GITHUB_TOKEN = "ghp_${'a'.repeat(36)}"
+
+[mcp_servers.custom]
+command = "python3"
+args = ["server.py"]
+`)
+    const { servers, findings } = await scanMcpServers(box.ctx())
+    expect(servers.map((s) => s.name).sort()).toEqual(['custom', 'github'])
+    const github = servers.find((s) => s.name === 'github')!
+    expect(github.isKnown).toBe(true)
+    expect(github.secretKeys).toEqual(['GITHUB_TOKEN'])
+    expect(github.envVars!['GITHUB_TOKEN']).not.toContain('aaaaaaaaaa')
+    expect(findings.some((f) => f.title.includes('custom') && f.severity === 'medium')).toBe(true)
+  })
+
+  it('never exposes raw env values', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { x: { command: 'node', args: ['x.js'], env: { OPENAI_API_KEY: 'sk-proj-' + 'z'.repeat(40) } } } }))
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(JSON.stringify(servers)).not.toContain('zzzzzzzzzz')
+    expect(servers[0]!.secretKeys).toEqual(['OPENAI_API_KEY'])
+  })
+
+  it('flags unrecognized local servers holding credentials as high', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { sketchy: { command: 'npx', args: ['-y', 'sketchy-mcp'], env: { API_KEY: 'real-looking-value-123456' } } } }))
+    const { findings } = await scanMcpServers(box.ctx())
+    expect(findings[0]!.severity).toBe('high')
+    expect(findings[0]!.category).toBe('mcp')
+  })
+
+  it('treats env references like ${VAR} as not secrets', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { ok: { command: 'npx', args: ['-y', 'some-mcp'], env: { API_KEY: '${API_KEY}' } } } }))
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers[0]!.secretKeys).toEqual([])
+  })
+
+  it('captures Authorization headers on remote servers', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { r: { url: 'https://api.example.com/mcp', headers: { Authorization: 'Bearer abcdefghijklmnop' } } } }))
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers[0]!.secretKeys).toEqual(['header:Authorization'])
+    expect(servers[0]!.headers!['Authorization']).not.toContain('abcdefghijklmnop')
+  })
+
+  it('reads VS Code style servers key and JSONC comments', async () => {
+    box = sandbox()
+    box.write('home/work/app/.vscode/mcp.json', `{
+  // comment
+  "servers": {
+    "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"], },
+  }
+}`)
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers).toHaveLength(1)
+    expect(servers[0]!.isKnown).toBe(true)
+  })
+
+  it('reads OpenCode array command format', async () => {
+    box = sandbox()
+    box.write('home/.config/opencode/opencode.json', JSON.stringify({ mcp: { local: { type: 'local', command: ['bun', 'x', 'my-mcp'], environment: { MY_KEY: 'sk-ant-' + 'q'.repeat(30) } } } }))
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers[0]!.command).toBe('bun')
+    expect(servers[0]!.secretKeys).toEqual(['MY_KEY'])
+  })
+
+  it('skips malformed files', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', '{ not json')
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers).toEqual([])
+  })
+
+  it('honors --agent by skipping other agents sources', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { a: { command: 'npx', args: ['x'] } } }))
+    box.write('home/.claude.json', JSON.stringify({ mcpServers: { b: { command: 'npx', args: ['y'] } } }))
+    const { servers } = await scanMcpServers(box.ctx([], { agent: 'cursor' }))
+    expect(servers.map((s) => s.name)).toEqual(['a'])
+  })
+
+  it('flags plain http remote servers', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { r: { url: 'http://mcp.example.com/sse' } } }))
+    const { findings } = await scanMcpServers(box.ctx())
+    expect(findings[0]!.title).toContain('plain HTTP')
   })
 })
