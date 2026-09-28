@@ -198,3 +198,26 @@ describe('scanShell grok build', () => {
     expect(findings.find((f) => f.title.includes('reviews its own'))?.severity).toBe('medium')
   })
 })
+
+describe('scanShell claude code sandbox', () => {
+  it('downgrades bypass mode when the sandbox is on and flags weakened sandbox settings', async () => {
+    box = sandbox()
+    box.write('home/.claude/settings.json', JSON.stringify({
+      permissions: { defaultMode: 'bypassPermissions', deny: ['Read(./.env)'] },
+      sandbox: { enabled: true, excludedCommands: ['git', 'curl'], network: { allowedDomains: ['*'] }, credentials: { allowPlaintextInject: true } },
+    }))
+    const { findings } = await scanShell(box.ctx([agent('claude-code')]))
+    expect(findings.find((f) => f.title.includes('without permission prompts'))?.severity).toBe('medium')
+    expect(findings.find((f) => f.title.includes('escape hatch'))?.severity).toBe('low')
+    expect(findings.find((f) => f.title.includes('excluded from'))?.detail).toContain('curl')
+    expect(findings.some((f) => f.title.includes('every network domain'))).toBe(true)
+    expect(findings.some((f) => f.title.includes('plaintext'))).toBe(true)
+  })
+
+  it('reports a locked sandbox as info', async () => {
+    box = sandbox()
+    box.write('home/.claude/settings.json', JSON.stringify({ permissions: { deny: ['Read(./.env)'] }, sandbox: { enabled: true, allowUnsandboxedCommands: false } }))
+    const { findings } = await scanShell(box.ctx([agent('claude-code')]))
+    expect(findings.find((f) => f.title.includes('locked'))?.severity).toBe('info')
+  })
+})

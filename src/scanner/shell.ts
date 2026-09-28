@@ -41,12 +41,14 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
   ].filter((p) => existsSync(p))
 
   let promptsIntact = true
+  const sandboxOn = files.some((p) => rec(rec(readJson(p))?.['sandbox'])?.['enabled'] === true)
   for (const path of files) {
     const settings = rec(readJson(path))
     if (!settings) continue
     const short = path.replace(ctx.home, '~')
     const perms = rec(settings['permissions'])
     const mode = perms?.['defaultMode']
+    findings.push(...claudeSandbox(agent, settings, path, short))
     const allow = strArr(perms?.['allow'])
     const bashAll = allow.filter((r) => /^Bash(\(\*?(:\*)?\))?$/.test(r.trim()))
     const bashRules = allow.filter((r) => r.startsWith('Bash('))
@@ -58,9 +60,9 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
       posture.reasons.push(`Claude Code defaultMode is ${mode} in ${short}`)
       findings.push({
         category: 'shell',
-        severity: 'high',
+        severity: sandboxOn ? 'medium' : 'high',
         title: `Claude Code runs without permission prompts (${mode})`,
-        detail: `${short} sets permissions.defaultMode to "${mode}". Any instruction the model follows, including one injected through a README, issue, or web page, executes immediately.`,
+        detail: `${short} sets permissions.defaultMode to "${mode}". Any instruction the model follows, including one injected through a README, issue, or web page, executes immediately.${sandboxOn ? ' The Bash sandbox is on, which contains shell commands but not the other tools.' : ''}`,
         path,
         agent: agent.slug,
       })
@@ -165,6 +167,34 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
       detail: 'Default permission mode is active. Shell commands outside the allow list ask first.',
       agent: agent.slug,
     })
+  }
+  return findings
+}
+
+function claudeSandbox(agent: Agent, settings: Record<string, unknown>, path: string, short: string): Finding[] {
+  const sandbox = rec(settings['sandbox'])
+  if (!sandbox) return []
+  const findings: Finding[] = []
+  const network = rec(sandbox['network'])
+  const credentials = rec(sandbox['credentials'])
+  if (sandbox['enabled'] === true) {
+    const escape = sandbox['allowUnsandboxedCommands'] !== false
+    findings.push({ category: 'shell', severity: escape ? 'low' : 'info', title: escape ? 'Claude Code sandbox is on, with the unsandboxed escape hatch open' : 'Claude Code sandbox is on and locked', detail: `${short} enables the Bash sandbox. ${escape ? 'allowUnsandboxedCommands is not set to false, so a command that fails inside the sandbox can be retried outside it with dangerouslyDisableSandbox.' : 'Commands that fail under the sandbox stay blocked.'}`, path, agent: agent.slug })
+  }
+  const excluded = strArr(sandbox['excludedCommands'])
+  const riskyExcluded = excluded.filter((c) => /curl|wget|ssh|scp|sudo|bash|sh$|python|node|npx|docker|\*/.test(c))
+  if (riskyExcluded.length > 0) {
+    findings.push({ category: 'shell', severity: 'medium', title: `${riskyExcluded.length} command${riskyExcluded.length > 1 ? 's' : ''} excluded from the Claude Code sandbox`, detail: `${short} sandbox.excludedCommands lets ${riskyExcluded.slice(0, 5).join(', ')} run with no filesystem or network isolation.`, path, agent: agent.slug })
+  }
+  const domains = strArr(network?.['allowedDomains'])
+  if (domains.some((d) => d === '*' || d === '*.*')) {
+    findings.push({ category: 'shell', severity: 'medium', title: 'Claude Code sandbox allows every network domain', detail: `${short} sandbox.network.allowedDomains contains a wildcard, so the network isolation does nothing.`, path, agent: agent.slug })
+  }
+  if (credentials?.['allowPlaintextInject'] === true) {
+    findings.push({ category: 'shell', severity: 'medium', title: 'Claude Code sandbox injects credentials in plaintext', detail: `${short} sets sandbox.credentials.allowPlaintextInject, so masked tokens are handed to sandboxed commands in the clear.`, path, agent: agent.slug })
+  }
+  if (sandbox['enableWeakerNestedSandbox'] === true) {
+    findings.push({ category: 'shell', severity: 'low', title: 'Claude Code uses the weaker nested sandbox', detail: `${short} sets sandbox.enableWeakerNestedSandbox. Isolation inside containers is reduced.`, path, agent: agent.slug })
   }
   return findings
 }
