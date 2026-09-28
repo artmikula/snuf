@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Agent, Finding, ScanContext } from '../types.js'
+import type { Finding, ScanContext } from '../types.js'
 import { readText } from './config-parsers.js'
 
 interface GitEntry {
@@ -143,21 +143,6 @@ function globalConfigFindings(ctx: ScanContext): Finding[] {
   return findings
 }
 
-interface Patch {
-  slug: string
-  fixed?: string
-  note: string
-}
-
-const GITSPAWN: Patch[] = [
-  { slug: 'claude-code', fixed: '2.1.196', note: 'core.fsmonitor path fixed in 2.1.196. A second config path used by ultrareview was still open at publication.' },
-  { slug: 'codex', fixed: '0.131.0', note: 'affected 0.102.0 through 0.130.0, fixed in 0.131.0.' },
-  { slug: 'goose', fixed: '1.44.0', note: 'fixed in 1.44.0.' },
-  { slug: 'hermes', note: 'unpatched at publication (confirmed on 0.21.0).' },
-  { slug: 'qwen-code', note: 'unpatched at publication (confirmed on 0.22.3).' },
-  { slug: 'grok', note: 'unpatched at publication (confirmed on 1.0.13).' },
-]
-
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(/[.-]/).map((x) => parseInt(x, 10))
   const pb = b.split(/[.-]/).map((x) => parseInt(x, 10))
@@ -170,34 +155,7 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
-function agentVersionFindings(agents: Agent[]): Finding[] {
-  const findings: Finding[] = []
-  for (const agent of agents) {
-    const patch = GITSPAWN.find((p) => p.slug === agent.slug)
-    if (!patch) continue
-    if (patch.fixed) {
-      if (!agent.version || compareVersions(agent.version, patch.fixed) >= 0) continue
-      findings.push({
-        category: 'git',
-        severity: 'high',
-        title: `${agent.name} v${agent.version} is vulnerable to GitSpawn`,
-        detail: `A cloned repo's .git/config can run code through core.fsmonitor when the agent calls git status. ${agent.name}: ${patch.note} Update to ${patch.fixed} or later.`,
-        agent: agent.slug,
-      })
-      continue
-    }
-    findings.push({
-      category: 'git',
-      severity: 'medium',
-      title: `${agent.name} had no GitSpawn fix when the flaw was published`,
-      detail: `A cloned repo's .git/config can run code through core.fsmonitor when the agent calls git status. ${agent.name}: ${patch.note} Check the changelog for your version and inspect .git/config before opening unfamiliar repos.`,
-      agent: agent.slug,
-    })
-  }
-  return findings
-}
-
 export async function scanGit(ctx: ScanContext): Promise<Finding[]> {
   if (ctx.agents.length === 0) return []
-  return [...repoConfigFindings(ctx), ...globalConfigFindings(ctx), ...agentVersionFindings(ctx.agents)]
+  return [...repoConfigFindings(ctx), ...globalConfigFindings(ctx)]
 }

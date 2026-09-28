@@ -9,6 +9,7 @@ import { scanShell } from './shell.js'
 import { scanRules } from './rules.js'
 import { scanGit } from './git.js'
 import { scanCi } from './ci.js'
+import { advisoryFindings } from './advisories.js'
 import { calculateScore, sortFindings } from '../scoring/risk.js'
 import { VERSION } from '../version.js'
 
@@ -26,8 +27,9 @@ export async function runScan(options: ScanOptions): Promise<ScanResult> {
   const { findings: ruleFindings } = await scanRules(ctx)
   const gitFindings = await scanGit(ctx)
   const ciFindings = await scanCi(ctx)
+  const advisories = ctx.agents.length > 0 ? advisoryFindings(ctx.agents) : []
 
-  const findings = sortFindings([...secretFindings, ...mcpFindings, ...shellFindings, ...permFindings, ...ruleFindings, ...gitFindings, ...ciFindings])
+  const findings = sortFindings([...secretFindings, ...mcpFindings, ...shellFindings, ...permFindings, ...ruleFindings, ...gitFindings, ...ciFindings, ...advisories])
 
   return {
     version: VERSION,

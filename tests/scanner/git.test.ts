@@ -76,18 +76,4 @@ describe('scanGit', () => {
     expect(findings.find((f) => f.title.includes('Global git config'))?.severity).toBe('medium')
     expect(findings.find((f) => f.title.includes('alias'))?.severity).toBe('info')
   })
-
-  it('flags unpatched agent versions', async () => {
-    box = sandbox()
-    const findings = await scanGit(box.ctx([
-      { ...agent('codex', 'Codex CLI'), version: '0.120.0' },
-      { ...agent('claude-code', 'Claude Code'), version: '2.1.250' },
-      { ...agent('goose', 'Goose'), version: '1.44.0' },
-      agent('hermes', 'Hermes Agent'),
-    ]))
-    expect(findings.find((f) => f.title.startsWith('Codex CLI'))?.severity).toBe('high')
-    expect(findings.some((f) => f.title.startsWith('Claude Code v'))).toBe(false)
-    expect(findings.some((f) => f.title.startsWith('Goose'))).toBe(false)
-    expect(findings.find((f) => f.title.startsWith('Hermes Agent'))?.severity).toBe('medium')
-  })
 })

@@ -29,6 +29,7 @@ snuf/
 │   │   ├── rules.ts           # Scan rules files, skills, slash commands
 │   │   ├── git.ts             # .git/config attack surface (GitSpawn), agent patch levels
 │   │   ├── ci.ts              # Agent actions in .github/workflows
+│   │   ├── advisories.ts      # Installed agent version vs known security fixes
 │   │   ├── permissions.ts     # Analyze file/dir access scope
 │   │   ├── secrets.ts         # Find exposed API keys & tokens
 │   │   ├── secret-patterns.ts # Shared name and value classifier, masking

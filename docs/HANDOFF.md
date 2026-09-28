@@ -65,6 +65,15 @@ Two things changed in reporting: the markdown report footer points to the audit 
 - SARIF 2.1 output (`--format sarif`, or `--output x.sarif`) for GitHub code scanning. README has the upload-sarif workflow.
 - 128 tests. Runtime still about 0.2s on a loaded machine.
 
+## Fourth pass (same day)
+
+- `src/scanner/advisories.ts` holds the version table: Claude Code 2.1.196 (GitSpawn), 2.1.128 (/proc reads), 2.1.91 (CVE-2026-35020..22); Codex 0.131.0 (GitSpawn), 0.23.0 (CVE-2025-61260); Goose 1.44.0; Cursor 3.0.0 (CVE-2026-48124, DuneSlide). Unpatched notes for Hermes, Qwen Code, Grok Build. Add new advisories there, one object each. OpenClaw's minimum stays in shell.ts because it needs the gateway context.
+- Claude Code auto mode became the default on 2026-08-14. With no pinned defaultMode snuf now reports "likely runs in auto mode" (low). `disableAutoMode: "disable"` restores the info finding.
+- OpenCode `share: "auto"` (medium). mcp-remote token cache `~/.mcp-auth` or `MCP_REMOTE_CONFIG_DIR` (high). Remediation hints on the Claude Code and Codex credential store findings (`cli_auth_credentials_store = "keyring"`).
+- Claude plugins: third party marketplaces from `~/.claude/plugins/known_marketplaces.json` plus installed plugins from `installed_plugins.json`. Channels under `~/.claude/channels/*` are a remote control path, high when prompts are off, and their `.env` files are credential stores.
+- Windows: Store installed Claude Desktop config under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`.
+- 133 tests.
+
 ## Known rough edges
 
 - Grok Build permission keys are not verified. docs.x.ai/build/settings/reference has the TOML key list. The GitSpawn version table marks it unpatched as of Sept 1.
