@@ -88,6 +88,7 @@ interface RawServer {
   env?: Record<string, unknown>
   headers?: Record<string, unknown>
   url?: string
+  autoApproved?: string[]
 }
 
 interface ConfigSource {
@@ -108,6 +109,7 @@ function asStringArray(v: unknown): string[] | undefined {
 function fromEntry(name: string, entry: unknown): RawServer | undefined {
   const cfg = asRecord(entry)
   if (!cfg) return undefined
+  if (cfg['disabled'] === true || cfg['enabled'] === false) return undefined
   let command = typeof cfg['command'] === 'string' ? (cfg['command'] as string) : undefined
   let args = asStringArray(cfg['args'])
   if (Array.isArray(cfg['command'])) {
@@ -130,6 +132,7 @@ function fromEntry(name: string, entry: unknown): RawServer | undefined {
     url,
     env: asRecord(cfg['env']) ?? asRecord(cfg['environment']),
     headers: asRecord(cfg['headers']),
+    autoApproved: asStringArray(cfg['autoApprove']) ?? asStringArray(cfg['alwaysAllow']) ?? asStringArray(cfg['autoApproveTools']),
   }
 }
 
@@ -493,6 +496,7 @@ function toServer(raw: RawServer, source: ConfigSource): McpServer {
     secretKeys,
     hasNetworkAccess: reachesNetwork(raw),
     hasShellAccess: stdio && runsLocalCode(raw.command),
+    autoApproved: raw.autoApproved && raw.autoApproved.length > 0 ? raw.autoApproved : undefined,
     isKnown: isTrusted(raw.command, raw.args, raw.url),
     source: source.label,
     sourcePath: source.path,
@@ -554,6 +558,17 @@ function findingsFor(server: McpServer, path: string): Finding[] {
       severity: 'medium',
       title: `MCP server installs straight from a git repository: ${server.name}`,
       detail: `${gitSource.slice(0, 80)} is fetched and executed at launch with no registry, no version, and no audit trail. Whoever controls that repo controls what runs on your machine next time the agent starts. Source: ${server.source}`,
+      path,
+      agent: server.agent,
+    })
+  }
+  if (server.autoApproved) {
+    const all = server.autoApproved.includes('*')
+    findings.push({
+      category: 'mcp',
+      severity: !server.isKnown || all ? 'medium' : 'low',
+      title: `MCP server tools run without confirmation: ${server.name}`,
+      detail: `${all ? 'Every tool' : `${server.autoApproved.length} tool${server.autoApproved.length > 1 ? 's' : ''} (${server.autoApproved.slice(0, 4).join(', ')}${server.autoApproved.length > 4 ? ', ...' : ''})`} on "${server.name}" ${all ? 'is' : server.autoApproved.length > 1 ? 'are' : 'is'} auto approved, so a prompt injection can call ${all ? 'them' : server.autoApproved.length > 1 ? 'them' : 'it'} without you seeing it.${server.isKnown ? '' : ' The publisher is not recognized.'} Source: ${server.source}`,
       path,
       agent: server.agent,
     })

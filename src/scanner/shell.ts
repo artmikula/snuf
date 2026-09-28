@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import type { Agent, Finding, ScanContext } from '../types.js'
 import { readJson, readText, parseTomlSubset } from './config-parsers.js'
 import { compareVersions } from './git.js'
@@ -212,15 +212,29 @@ function gemini(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[
   const tools = rec(settings?.['tools'])
   const autoAccept = settings?.['autoAccept'] === true || tools?.['autoAccept'] === true
   const yolo = rec(settings?.['general'])?.['yolo'] === true
+  const trustPath = join(ctx.home, '.gemini', 'trustedFolders.json')
+  const trust = rec(readJson(trustPath))
+  const trustMap = rec(trust?.['config']) ?? trust
+  const home = ctx.home.replace(/[\\/]+$/, '')
+  const trustedHome = Object.entries(trustMap ?? {}).filter(([folder, level]) => {
+    if (level !== 'TRUST_FOLDER' && level !== 'TRUST_PARENT') return false
+    const effective = (level === 'TRUST_PARENT' ? dirname(folder) : folder).replace(/[\\/]+$/, '')
+    return effective === home || home.startsWith(effective + '/') || effective === '/'
+  })
+  const findings: Finding[] = []
+  if (trustedHome.length > 0) {
+    findings.push({ category: 'shell', severity: 'high', title: 'Gemini CLI trusts your home directory', detail: `${trustPath.replace(ctx.home, '~')} marks ${trustedHome.map(([f]) => f).join(', ')} as trusted, so every folder under it skips the trust prompt and loads its GEMINI.md, settings and MCP servers automatically.`, path: trustPath, agent: agent.slug })
+  }
   if (yolo) {
     posture.unprompted = true
     posture.reasons.push('Gemini CLI yolo mode is enabled')
-    return [{ category: 'shell', severity: 'high', title: 'Gemini CLI runs in YOLO mode', detail: `${path.replace(ctx.home, '~')} enables yolo. Every tool call, including shell, is auto approved.`, path, agent: agent.slug }]
+    findings.push({ category: 'shell', severity: 'high', title: 'Gemini CLI runs in YOLO mode', detail: `${path.replace(ctx.home, '~')} enables yolo. Every tool call, including shell, is auto approved.`, path, agent: agent.slug })
+  } else if (autoAccept) {
+    findings.push({ category: 'shell', severity: 'medium', title: 'Gemini CLI auto accepts tool calls', detail: `${path.replace(ctx.home, '~')} sets autoAccept. Read only tools run without a prompt; check whether shell is included in your version.`, path, agent: agent.slug })
+  } else if (findings.length === 0) {
+    findings.push({ category: 'shell', severity: 'info', title: 'Gemini CLI prompts before running commands', detail: 'No auto accept or yolo settings found.', agent: agent.slug })
   }
-  if (autoAccept) {
-    return [{ category: 'shell', severity: 'medium', title: 'Gemini CLI auto accepts tool calls', detail: `${path.replace(ctx.home, '~')} sets autoAccept. Read only tools run without a prompt; check whether shell is included in your version.`, path, agent: agent.slug }]
-  }
-  return [{ category: 'shell', severity: 'info', title: 'Gemini CLI prompts before running commands', detail: 'No auto accept or yolo settings found.', agent: agent.slug }]
+  return findings
 }
 
 function generic(agent: Agent, severity: Finding['severity'], detail: string): Finding {

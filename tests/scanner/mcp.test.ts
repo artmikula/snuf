@@ -208,3 +208,19 @@ tools:
     expect(servers.find((s) => s.name === 'remote')!.transport).toBe('http')
   })
 })
+
+describe('scanMcpServers auto approve and disabled', () => {
+  it('flags Roo alwaysAllow and Cline autoApprove lists, skips disabled servers', async () => {
+    box = sandbox()
+    box.write('home/work/app/.roo/mcp.json', JSON.stringify({ mcpServers: {
+      a: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github@1.0.0'], alwaysAllow: ['create_issue', 'push_files'] },
+      b: { command: 'node', args: ['x.js'], autoApprove: ['*'] },
+      off: { command: 'node', args: ['y.js'], disabled: true, autoApprove: ['*'] },
+    } }))
+    const { servers, findings } = await scanMcpServers(box.ctx())
+    expect(servers.map((s) => s.name)).toEqual(['a', 'b'])
+    const auto = findings.filter((f) => f.title.includes('without confirmation'))
+    expect(auto.map((f) => f.severity)).toEqual(['low', 'medium'])
+    expect(auto[0]!.detail).toContain('create_issue')
+  })
+})

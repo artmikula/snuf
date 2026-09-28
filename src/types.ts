@@ -25,6 +25,7 @@ export interface McpServer {
   hasNetworkAccess: boolean
   hasShellAccess: boolean
   isKnown: boolean
+  autoApproved?: string[]
   source: string
   sourcePath: string
 }

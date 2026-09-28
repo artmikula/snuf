@@ -155,3 +155,22 @@ describe('scanShell openclaw and factory', () => {
     expect(findings.find((f) => f.title.includes('risky command'))?.detail).toContain('curl *')
   })
 })
+
+describe('scanShell gemini trusted folders', () => {
+  it('flags a trusted home directory, including via TRUST_PARENT', async () => {
+    box = sandbox()
+    box.write('home/.gemini/trustedFolders.json', JSON.stringify({ config: { [box.project]: 'TRUST_FOLDER', [box.home + '/work']: 'TRUST_PARENT', '/somewhere/else': 'DO_NOT_TRUST' } }))
+    const { findings } = await scanShell(box.ctx([agent('gemini-cli', 'Gemini CLI')]))
+    const trust = findings.find((f) => f.title.includes('trusts your home'))
+    expect(trust?.severity).toBe('high')
+    expect(trust?.detail).toContain(box.home + '/work')
+    expect(trust?.detail).not.toContain(box.project + ',')
+  })
+
+  it('stays quiet when only project folders are trusted', async () => {
+    box = sandbox()
+    box.write('home/.gemini/trustedFolders.json', JSON.stringify({ [box.project]: 'TRUST_FOLDER' }))
+    const { findings } = await scanShell(box.ctx([agent('gemini-cli', 'Gemini CLI')]))
+    expect(findings.map((f) => f.severity)).toEqual(['info'])
+  })
+})
