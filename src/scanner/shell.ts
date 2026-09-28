@@ -272,7 +272,27 @@ export function parseCodexRules(text: string): CodexRule[] {
   return rules
 }
 
-const RISKY_PREFIX = /^(curl|wget|sudo|rm|chmod|chown|ssh|scp|rsync|eval|nc|python3?|node|npx|docker)$/
+const INTERPRETERS = new Set(['python', 'python3', 'node', 'npx', 'bunx', 'uvx', 'docker', 'perl', 'ruby', 'deno', 'bun'])
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'fish', 'dash', 'ksh'])
+
+function isBareShell(p: string[]): boolean {
+  const base = p[0]?.split('/').at(-1) ?? ''
+  if (!SHELLS.has(base)) return p.length === 1 && p[0] === '*'
+  return p.length === 1 || (p.length === 2 && /^-l?c$/.test(p[1] ?? ''))
+}
+
+export function riskyPrefix(p: string[]): boolean {
+  const base = p[0]?.split('/').at(-1) ?? ''
+  const second = p[1] ?? ''
+  if (['sudo', 'doas', 'eval', 'nc', 'ncat', 'socat'].includes(base)) return true
+  if (['curl', 'wget'].includes(base)) return !p.some((x) => /^https?:\/\//.test(x))
+  if (['rm', 'rmdir', 'chmod', 'chown', 'ssh', 'scp', 'rsync', 'dd', 'mkfs'].includes(base)) return p.length === 1 || (p.length === 2 && second.startsWith('-'))
+  if (INTERPRETERS.has(base)) return p.length === 1 || (p.length === 2 && /^-(c|e|p)$/.test(second))
+  if (base === 'git' && (second === 'push' || second === 'clean' || second === 'reset')) return p.length === 2
+  if (base === 'npm' && second === 'publish') return true
+  if (base === 'gh' && ['auth', 'secret', 'release'].includes(second)) return p.length <= 2
+  return false
+}
 
 function codexRules(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const findings: Finding[] = []
@@ -289,16 +309,16 @@ function codexRules(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
       if (text === undefined) continue
       const short = path.replace(ctx.home, '~')
       const allows = parseCodexRules(text).filter((r) => r.decision === 'allow')
-      const shells = allows.filter((r) => r.pattern.length === 1 && /^(bash|sh|zsh|\*)$/.test(r.pattern[0]!))
+      const shells = allows.filter((r) => isBareShell(r.pattern))
       if (shells.length > 0) {
         posture.unprompted = true
         posture.reasons.push(`Codex execution policy allows ${shells[0]!.pattern[0]} in ${short}`)
         findings.push({ category: 'shell', severity: 'high', title: 'Codex CLI execution policy allows a bare shell', detail: `${short} allows "${shells[0]!.pattern.join(' ')}" with no further prefix. Anything after it runs outside the sandbox without a prompt.`, path, agent: agent.slug })
         continue
       }
-      const risky = allows.filter((r) => RISKY_PREFIX.test(r.pattern[0] ?? '') || (r.pattern[0] === 'git' && r.pattern[1] === 'push') || (r.pattern[0] === 'npm' && r.pattern[1] === 'publish'))
+      const risky = allows.filter((r) => riskyPrefix(r.pattern))
       if (risky.length > 0) {
-        findings.push({ category: 'shell', severity: 'medium', title: `Codex CLI execution policy pre approves ${risky.length} risky command prefix${risky.length > 1 ? 'es' : ''}`, detail: `${short}: ${risky.slice(0, 6).map((r) => r.pattern.join(' ')).join(', ')}. These run outside the sandbox without a prompt.`, path, agent: agent.slug })
+        findings.push({ category: 'shell', severity: 'medium', title: `Codex CLI execution policy pre approves ${risky.length} risky command prefix${risky.length > 1 ? 'es' : ''}`, detail: `${short} has ${allows.length} allow rules. Open ended ones: ${risky.slice(0, 6).map((r) => r.pattern.join(' ')).join(', ')}${risky.length > 6 ? ` and ${risky.length - 6} more` : ''}. These run outside the sandbox without a prompt, and a prefix like "curl -s" matches any URL.`, path, agent: agent.slug })
       } else if (allows.length > 0) {
         findings.push({ category: 'shell', severity: 'info', title: `Codex CLI execution policy pre approves ${allows.length} command prefix${allows.length > 1 ? 'es' : ''}`, detail: `${short}: ${allows.slice(0, 8).map((r) => r.pattern.join(' ')).join(', ')}${allows.length > 8 ? ' and more' : ''}.`, path, agent: agent.slug })
       }

@@ -320,6 +320,11 @@ prefix_rule(
     decision = "allow",
 )
 
+prefix_rule(pattern=["curl", "-L", "https://example.com/health"], decision="allow")
+prefix_rule(pattern=["rm", "-rf", ".wrangler"], decision="allow")
+prefix_rule(pattern=["python3", "-m", "http.server"], decision="allow")
+prefix_rule(pattern=["/bin/zsh", "-lc", "'/Applications/App' --flag"], decision="allow")
+
 prefix_rule(
     pattern = ["rm", "-rf"],
     decision = "deny",
@@ -328,13 +333,16 @@ prefix_rule(
     const { findings } = await scanShell(box.ctx([agent('codex')]))
     const risky = findings.find((f) => f.title.includes('risky command prefix'))
     expect(risky?.severity).toBe('medium')
+    expect(risky?.title).toContain('1 risky')
     expect(risky?.detail).toContain('curl')
     expect(risky?.detail).not.toContain('rm -rf')
+    expect(risky?.detail).not.toContain('http.server')
+    expect(findings.some((f) => f.title.includes('bare shell'))).toBe(false)
   })
 
   it('flags a bare shell allow as high', async () => {
     box = sandbox()
-    box.write('home/work/app/.codex/rules/team.rules', 'prefix_rule(pattern = ["bash"], decision = "allow")\n')
+    box.write('home/work/app/.codex/rules/team.rules', 'prefix_rule(pattern = ["/bin/zsh", "-lc"], decision = "allow")\n')
     box.write('home/.codex/config.toml', '')
     const { findings, posture } = await scanShell(box.ctx([agent('codex')]))
     expect(posture.unprompted).toBe(true)

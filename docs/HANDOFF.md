@@ -57,6 +57,14 @@ Two things changed in reporting: the markdown report footer points to the audit 
 - End to end test in `tests/e2e.test.ts` that runs the orchestrator against a fake HOME and checks no secret value reaches any output format.
 - `npm publish` was attempted by the agent and blocked by the Claude Code permission classifier ("Create Public Surface"). Art has to run `npm publish --access public` himself.
 
+## Added later on 2026-09-28 (third pass)
+
+- Antigravity CLI is a new agent (Google retired Gemini CLI for consumers on 2026-06-18; binary `agy`, config `~/.gemini/antigravity-cli/settings.json`). Antigravity IDE policy lives in `~/.gemini/config/config.json` under `userSettings`.
+- Per agent permission readers now also cover: Cursor `hooks.json`, Codex `~/.codex/rules/*.rules` (prefix_rule, with a calibrated `riskyPrefix()` so `curl -L https://fixed` and `rm -rf .wrangler` are not flagged but `curl -s` and `/bin/zsh -lc` are), Kiro, Amp, Goose, Copilot CLI, Aider, Zed, Continue, Mistral Vibe, Qwen Code, Junie, Claude Code sandbox, third party plugin marketplaces, Channels.
+- Claude Desktop: `config.json` `oauth:tokenCache*` keys are a plaintext session token (high). `claude_desktop_config.json` `preferences.remoteSessionFolderGrants` records Cowork folder grants (high when home is granted).
+- SARIF 2.1 output (`--format sarif`, or `--output x.sarif`) for GitHub code scanning. README has the upload-sarif workflow.
+- 128 tests. Runtime still about 0.2s on a loaded machine.
+
 ## Known rough edges
 
 - Grok Build permission keys are not verified. docs.x.ai/build/settings/reference has the TOML key list. The GitSpawn version table marks it unpatched as of Sept 1.
