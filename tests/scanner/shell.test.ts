@@ -341,3 +341,29 @@ prefix_rule(
     expect(findings.find((f) => f.title.includes('bare shell'))?.severity).toBe('high')
   })
 })
+
+describe('scanShell aider and zed', () => {
+  it('reads aider yes-always, inline keys and auto-test', async () => {
+    box = sandbox()
+    box.write('home/work/app/.aider.conf.yml', 'yes-always: true\nauto-test: true\nopenai-api-key: sk-proj-' + 'k'.repeat(40) + '\n')
+    const { findings, posture } = await scanShell(box.ctx([agent('aider', 'Aider')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.find((f) => f.title.includes('yes to every'))?.detail).toContain('project scoped')
+    expect(findings.find((f) => f.category === 'secret')?.severity).toBe('critical')
+    expect(JSON.stringify(findings)).not.toContain('kkkkkkkkkk')
+    expect(findings.some((f) => f.title.includes('auto-test'))).toBe(true)
+  })
+
+  it('reads zed legacy and modern auto approve settings', async () => {
+    box = sandbox()
+    box.write('home/.config/zed/settings.json', JSON.stringify({ agent: { always_allow_tool_actions: true } }))
+    const legacy = await scanShell(box.ctx([agent('zed', 'Zed')]))
+    expect(legacy.findings[0]!.severity).toBe('high')
+    box.write('home/.config/zed/settings.json', JSON.stringify({ agent: { tool_permissions: { default: 'allow' } } }))
+    const modern = await scanShell(box.ctx([agent('zed', 'Zed')]))
+    expect(modern.findings[0]!.severity).toBe('high')
+    box.write('home/.config/zed/settings.json', JSON.stringify({ agent: { tool_permissions: { default: 'confirm' } } }))
+    const safe = await scanShell(box.ctx([agent('zed', 'Zed')]))
+    expect(safe.findings[0]!.severity).toBe('low')
+  })
+})

@@ -654,6 +654,55 @@ function antigravityCli(agent: Agent, ctx: ScanContext, posture: ShellPosture): 
   return findings
 }
 
+function yamlBool(text: string, key: string): boolean | undefined {
+  const m = text.match(new RegExp(`^\\s*${key}:\\s*(true|false)\\b`, 'm'))
+  return m ? m[1] === 'true' : undefined
+}
+
+function aider(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.aider.conf.yml'), join(ctx.project, '.aider.conf.yml')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const text = readText(path)
+    if (text === undefined) continue
+    const short = path.replace(ctx.home, '~')
+    if (yamlBool(text, 'yes-always') === true) {
+      posture.unprompted = true
+      posture.reasons.push(`Aider yes-always is set in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Aider answers yes to every prompt', detail: `${short} sets yes-always: true. Shell commands Aider proposes, file creation and git operations all proceed without confirmation.${path.startsWith(ctx.project) ? ' This file is project scoped, so it applies to anyone who clones the repo.' : ''}`, path, agent: agent.slug })
+    }
+    const keyLine = text.match(/^\s*(openai-api-key|anthropic-api-key|api-key|openrouter-api-key|deepseek-api-key|gemini-api-key)\s*:\s*["']?([^\s"'#]{8,})/im)
+    if (keyLine) {
+      findings.push({ category: 'secret', severity: 'critical', title: `${keyLine[1]!} stored in plaintext in Aider config`, detail: `${short} holds an API key inline. Move it to an environment variable or ~/.aider/.env.`, path, agent: agent.slug })
+    }
+    const autoRun = ['auto-test', 'auto-lint'].filter((k) => yamlBool(text, k) === true)
+    if (autoRun.length > 0) {
+      findings.push({ category: 'shell', severity: 'low', title: `Aider runs ${autoRun.join(' and ')} commands after every edit`, detail: `${short} enables ${autoRun.join(', ')}. The configured test-cmd and lint-cmd run without a prompt, and Aider commits with --no-verify by default, so pre commit hooks are skipped.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Aider asks before running commands unless yes-always is set. Note it commits with --no-verify by default, so pre commit secret scanners do not run.'))
+  return findings
+}
+
+function zed(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.config', 'zed', 'settings.json'), join(ctx.project, '.zed', 'settings.json')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const agentCfg = rec(rec(readJson(path))?.['agent'])
+    if (!agentCfg) continue
+    const short = path.replace(ctx.home, '~')
+    const legacy = agentCfg['always_allow_tool_actions'] === true
+    const modern = rec(agentCfg['tool_permissions'])?.['default'] === 'allow'
+    if (legacy || modern) {
+      posture.unprompted = true
+      posture.reasons.push(`Zed agent auto approves tools in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Zed agent runs every tool without confirmation', detail: `${short} sets ${legacy ? 'agent.always_allow_tool_actions: true' : 'agent.tool_permissions.default: "allow"'}. Terminal commands, edits and MCP tools all skip the prompt. Zed's own "always allow" button writes this for all tools, not just the one you clicked.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Zed asks per tool action unless agent.always_allow_tool_actions or agent.tool_permissions.default is set to allow in settings.json.'))
+  return findings
+}
+
 function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -816,11 +865,13 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         break
       case 'windsurf':
       case 'trae':
-      case 'zed':
         findings.push(generic(agent, 'low', `${agent.name} has an integrated terminal and an auto run setting stored in its app state, which snuf cannot read. Check the agent settings for auto run or turbo mode.`))
         break
       case 'aider':
-        findings.push(generic(agent, 'low', 'Aider runs lint and test commands automatically when configured with auto-lint or auto-test.'))
+        findings.push(...aider(agent, ctx, posture))
+        break
+      case 'zed':
+        findings.push(...zed(agent, ctx, posture))
         break
       case 'openclaw':
         findings.push(...openclaw(agent, ctx, posture))
