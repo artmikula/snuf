@@ -189,6 +189,17 @@ function codex(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[]
     posture.reasons.push('Codex sandbox_mode is danger-full-access')
     findings.push({ category: 'shell', severity: 'high', title: 'Codex CLI sandbox is disabled', detail: `${path.replace(ctx.home, '~')} sets sandbox_mode = "danger-full-access". Commands can write anywhere and reach the network.`, path, agent: agent.slug })
   }
+  if (sandbox !== 'danger-full-access' && rec(toml['sandbox_workspace_write'])?.['network_access'] === true) {
+    findings.push({ category: 'shell', severity: 'medium', title: 'Codex CLI sandbox allows network access', detail: `${path.replace(ctx.home, '~')} sets sandbox_workspace_write.network_access = true. Commands can reach the internet without an approval prompt, which is what an exfiltration needs.`, path, agent: agent.slug })
+  }
+  const projects = rec(toml['projects'])
+  if (projects) {
+    const home = ctx.home.replace(/[\\/]+$/, '')
+    const trustedHome = Object.entries(projects).filter(([p, v]) => rec(v)?.['trust_level'] === 'trusted' && (p.replace(/[\\/]+$/, '') === home || home.startsWith(p.replace(/[\\/]+$/, '') + '/')))
+    if (trustedHome.length > 0) {
+      findings.push({ category: 'shell', severity: 'high', title: 'Codex CLI trusts your home directory as a project', detail: `${path.replace(ctx.home, '~')} marks ${trustedHome.map(([p]) => p).join(', ')} as trusted. Any .codex/config.toml under it, including ones that arrive in a cloned repo, is applied without asking.`, path, agent: agent.slug })
+    }
+  }
   if (findings.length === 0) {
     findings.push({ category: 'shell', severity: 'info', title: `Codex CLI sandbox: ${String(sandbox ?? 'default')}, approval: ${String(approval ?? 'default')}`, detail: 'Sandbox and approval policy are not set to their most permissive values.', path, agent: agent.slug })
   }

@@ -49,6 +49,16 @@ describe('scanShell', () => {
     expect(findings.filter((f) => f.severity === 'high')).toHaveLength(2)
   })
 
+  it('flags codex network access and a trusted home directory', async () => {
+    box = sandbox()
+    box.write('home/.codex/config.toml', `approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n\n[sandbox_workspace_write]\nnetwork_access = true\n\n[projects."${box.home}"]\ntrust_level = "trusted"\n\n[projects."${box.project}"]\ntrust_level = "trusted"\n`)
+    const { findings } = await scanShell(box.ctx([agent('codex')]))
+    expect(findings.find((f) => f.title.includes('network access'))?.severity).toBe('medium')
+    const trust = findings.find((f) => f.title.includes('trusts your home'))
+    expect(trust?.severity).toBe('high')
+    expect(trust?.detail).not.toContain(box.project)
+  })
+
   it('reads gemini yolo mode', async () => {
     box = sandbox()
     box.write('home/.gemini/settings.json', JSON.stringify({ general: { yolo: true } }))
