@@ -221,3 +221,34 @@ describe('scanShell claude code sandbox', () => {
     expect(findings.find((f) => f.title.includes('locked'))?.severity).toBe('info')
   })
 })
+
+describe('scanShell kiro and claude allow list extras', () => {
+  it('parses Kiro permissions.yaml and agent allowedTools', async () => {
+    box = sandbox()
+    box.write('home/.kiro/settings/permissions.yaml', 'rules:\n  - capability: shell\n    match: ["git *", "curl *"]\n    effect: allow\n  - capability: fs_write\n    match: ["~/**"]\n    effect: allow\n')
+    box.write('home/.kiro/agents/ops.json', JSON.stringify({ name: 'ops', allowedTools: ['*'] }))
+    const { findings, posture } = await scanShell(box.ctx([agent('kiro', 'Kiro')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.find((f) => f.title.includes('risky shell'))?.detail).toContain('curl *')
+    expect(findings.some((f) => f.title.includes('writes outside'))).toBe(true)
+    expect(findings.find((f) => f.title.includes('trusts shell'))?.severity).toBe('high')
+  })
+
+  it('flags a blanket Kiro shell allow as high', async () => {
+    box = sandbox()
+    box.write('home/.kiro/settings/permissions.yaml', 'rules:\n  - capability: all\n    effect: allow\n')
+    const { findings } = await scanShell(box.ctx([agent('kiro', 'Kiro')]))
+    expect(findings[0]!.severity).toBe('high')
+  })
+
+  it('flags whole MCP server allow rules and reports hardening', async () => {
+    box = sandbox()
+    box.write('home/.claude/settings.json', JSON.stringify({ permissions: { allow: ['mcp__github', 'mcp__puppeteer__*', 'mcp__slack__post_message', 'WebFetch(domain:*)'], deny: ['Read(./.env)'], disableBypassPermissionsMode: 'disable', blockReadsOutsideWorkingDirectories: true } }))
+    const { findings } = await scanShell(box.ctx([agent('claude-code')]))
+    const mcp = findings.find((f) => f.title.includes('MCP server'))
+    expect(mcp?.title).toContain('2 MCP servers')
+    expect(mcp?.detail).not.toContain('slack')
+    expect(findings.some((f) => f.title.includes('pre approves WebFetch'))).toBe(true)
+    expect(findings.find((f) => f.title.includes('hardened'))?.title).toContain('bypass mode disabled')
+  })
+})

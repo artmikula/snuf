@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import type { Agent, Finding, ScanContext } from '../types.js'
+import fg from 'fast-glob'
 import { readJson, readText, parseTomlSubset } from './config-parsers.js'
 import { compareVersions } from './git.js'
 
@@ -52,7 +53,26 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
     const allow = strArr(perms?.['allow'])
     const bashAll = allow.filter((r) => /^Bash(\(\*?(:\*)?\))?$/.test(r.trim()))
     const bashRules = allow.filter((r) => r.startsWith('Bash('))
-    const wildcardTools = allow.filter((r) => /^(Write|Edit|MultiEdit|NotebookEdit|WebFetch)(\(\*\))?$/.test(r.trim()))
+    const wildcardTools = allow.filter((r) => /^(Write|Edit|MultiEdit|NotebookEdit|WebFetch)(\(\*\)|\(domain:\*\))?$/.test(r.trim()))
+    const wholeMcpServers = allow.map((r) => r.trim().match(/^mcp__((?:(?!__)[^(\s])+)(__\*)?$/)?.[1]).filter((s): s is string => Boolean(s))
+    if (wholeMcpServers.length > 0) {
+      findings.push({
+        category: 'shell',
+        severity: 'low',
+        title: `Claude Code pre approves every tool on ${wholeMcpServers.length} MCP server${wholeMcpServers.length > 1 ? 's' : ''}`,
+        detail: `${short} allows mcp__${wholeMcpServers.slice(0, 4).join(', mcp__')}${wholeMcpServers.length > 4 ? ' and more' : ''} without a prompt. Any tool those servers add later, including after an update, is approved too.`,
+        path,
+        agent: agent.slug,
+      })
+    }
+    const hardened = [
+      perms?.['disableBypassPermissionsMode'] === 'disable' ? 'bypass mode disabled' : null,
+      perms?.['disableAutoMode'] === 'disable' ? 'auto mode disabled' : null,
+      perms?.['blockReadsOutsideWorkingDirectories'] === true ? 'reads fenced to working directories' : null,
+    ].filter((x): x is string => x !== null)
+    if (hardened.length > 0) {
+      findings.push({ category: 'shell', severity: 'info', title: `Claude Code is hardened: ${hardened.join(', ')}`, detail: `${short} sets these under permissions. Good.`, path, agent: agent.slug })
+    }
 
     if (mode === 'bypassPermissions' || mode === 'dontAsk') {
       promptsIntact = false
@@ -385,6 +405,81 @@ function opencode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Findin
   return findings
 }
 
+interface KiroRule {
+  capability: string
+  match: string[]
+  effect: string
+}
+
+export function parseKiroRules(text: string): KiroRule[] {
+  const rules: KiroRule[] = []
+  let current: KiroRule | undefined
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    const cap = line.match(/^-\s*capability:\s*["']?([\w]+)/)
+    if (cap) {
+      current = { capability: cap[1]!, match: [], effect: 'ask' }
+      rules.push(current)
+      continue
+    }
+    if (!current) continue
+    const match = line.match(/^match:\s*\[(.*)\]/)
+    if (match) current.match = match[1]!.split(',').map((m) => m.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+    const effect = line.match(/^effect:\s*["']?(\w+)/)
+    if (effect) current.effect = effect[1]!
+  }
+  return rules
+}
+
+function kiro(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const findings: Finding[] = []
+  const yamlFiles = [join(ctx.home, '.kiro', 'settings', 'permissions.yaml'), join(ctx.project, '.kiro', 'settings', 'permissions.yaml')]
+  try {
+    yamlFiles.push(...fg.sync('.kiro/workspace-roots/*/permissions.yaml', { cwd: ctx.home, absolute: true, dot: true, suppressErrors: true }))
+  } catch {
+    // no workspace roots
+  }
+  for (const path of yamlFiles) {
+    const text = readText(path)
+    if (text === undefined) continue
+    const short = path.replace(ctx.home, '~')
+    const rules = parseKiroRules(text).filter((r) => r.effect === 'allow')
+    const blanket = rules.filter((r) => ['shell', 'all', 'builtin'].includes(r.capability) && (r.match.length === 0 || r.match.includes('*') || r.match.includes('**')))
+    if (blanket.length > 0) {
+      posture.unprompted = true
+      posture.reasons.push(`Kiro permissions allow ${blanket[0]!.capability} without a pattern in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Kiro CLI runs every shell command without asking', detail: `${short} has an allow rule for capability "${blanket[0]!.capability}" with no restricting pattern.`, path, agent: agent.slug })
+      continue
+    }
+    const risky = rules.filter((r) => r.capability === 'shell').flatMap((r) => r.match).filter((m) => /curl|wget|sudo|rm|chmod|ssh|scp|eval|npm publish|git push/.test(m))
+    if (risky.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: `Kiro CLI pre approves ${risky.length} risky shell pattern${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+    }
+    const fsAll = rules.filter((r) => ['fs_write', 'filesystem'].includes(r.capability) && (r.match.length === 0 || r.match.some((m) => m === '*' || m === '**' || m.startsWith('~') || m.startsWith('/'))))
+    if (fsAll.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Kiro CLI writes outside the project without asking', detail: `${short} allows ${fsAll[0]!.capability} on ${fsAll[0]!.match.join(', ') || 'everything'}.`, path, agent: agent.slug })
+    }
+  }
+  let agentFiles: string[] = []
+  try {
+    agentFiles = fg.sync(['.kiro/agents/*.json'], { cwd: ctx.home, absolute: true, dot: true, suppressErrors: true })
+  } catch {
+    agentFiles = []
+  }
+  for (const path of agentFiles) {
+    const cfg = rec(readJson(path))
+    const tools = strArr(cfg?.['allowedTools'])
+    if (tools.some((t) => t === '*' || t === 'shell' || t === 'execute_bash' || t === '@builtin')) {
+      posture.unprompted = true
+      posture.reasons.push(`Kiro agent ${String(cfg?.['name'] ?? path)} trusts shell`)
+      findings.push({ category: 'shell', severity: 'high', title: `Kiro agent "${String(cfg?.['name'] ?? path.split('/').at(-1))}" trusts shell commands`, detail: `${path.replace(ctx.home, '~')} allowedTools includes ${tools.filter((t) => t === '*' || t === 'shell' || t === 'execute_bash' || t === '@builtin').join(', ')}. Commands run without confirmation whenever this agent is active.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Kiro asks before shell commands and writes by default. Rules in ~/.kiro/settings/permissions.yaml and agents under ~/.kiro/agents can change that.'))
+  return findings
+}
+
 function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -527,8 +622,10 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
       case 'opencode':
         findings.push(...opencode(agent, ctx, posture))
         break
-      case 'windsurf':
       case 'kiro':
+        findings.push(...kiro(agent, ctx, posture))
+        break
+      case 'windsurf':
       case 'trae':
       case 'zed':
       case 'antigravity':
