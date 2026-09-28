@@ -39,6 +39,20 @@ export const ADVISORIES: Advisory[] = [
     detail: 'CVE-2026-35020, 35021 and 35022 are command validator bypasses that chain into credential exfiltration. Fixed by 2.1.91.',
   },
   {
+    slug: 'claude-code',
+    fixed: '2.1.53',
+    category: 'shell',
+    title: 'lets a cloned repo skip the trust dialog',
+    detail: 'CVE-2026-33068: a committed .claude/settings.json with defaultMode bypassPermissions silenced the workspace trust prompt on first open. Fixed in 2.1.53.',
+  },
+  {
+    slug: 'opencode',
+    fixed: '1.1.10',
+    category: 'shell',
+    title: 'exposes a local command execution API',
+    detail: 'CVE-2026-22812 (fixed 1.0.216): OpenCode started an unauthenticated HTTP server that any local process or website could use to run shell commands. CVE-2026-22813 (fixed 1.1.10): XSS in the web UI with the same outcome.',
+  },
+  {
     slug: 'codex',
     fixed: '0.131.0',
     category: 'git',

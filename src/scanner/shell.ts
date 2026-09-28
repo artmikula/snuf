@@ -82,7 +82,7 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
         category: 'shell',
         severity: sandboxOn ? 'medium' : 'high',
         title: `Claude Code runs without permission prompts (${mode})`,
-        detail: `${short} sets permissions.defaultMode to "${mode}". Any instruction the model follows, including one injected through a README, issue, or web page, executes immediately.${sandboxOn ? ' The Bash sandbox is on, which contains shell commands but not the other tools.' : ''}`,
+        detail: `${short} sets permissions.defaultMode to "${mode}". Any instruction the model follows, including one injected through a README, issue, or web page, executes immediately.${sandboxOn ? ' The Bash sandbox is on, which contains shell commands but not the other tools.' : ''}${path.startsWith(ctx.project) && !path.endsWith('settings.local.json') ? ' This is the shared project file, so it arrived with the repo. Before Claude Code 2.1.53 this exact setting also skipped the trust dialog (CVE-2026-33068).' : ''}`,
         path,
         agent: agent.slug,
       })
