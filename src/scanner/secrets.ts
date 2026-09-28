@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import fg from 'fast-glob'
 import { join } from 'node:path'
 import type { Finding, McpServer, ScanContext } from '../types.js'
 import { readJson, readText, parseEnvFile, walkStrings, isTrackedInGit } from './config-parsers.js'
@@ -121,7 +122,15 @@ function envFileFindings(home: string, project: string): Finding[] {
 function credentialStoreFindings(home: string, agents: ScanContext['agents']): Finding[] {
   const findings: Finding[] = []
   const slugs = new Set(agents.map((a) => a.slug))
-  for (const store of credentialStores(home)) {
+  const channelEnvs = (() => {
+    try {
+      return fg.sync('.claude/channels/*/.env', { cwd: home, dot: true, absolute: true, suppressErrors: true })
+    } catch {
+      return [] as string[]
+    }
+  })()
+  const stores = [...credentialStores(home), ...channelEnvs.map((path) => ({ path, agent: 'claude-code', label: `Claude Code ${path.split('/').at(-2)} channel bot token` }))]
+  for (const store of stores) {
     if (!existsSync(store.path)) continue
     if (agents.length > 0 && !slugs.has(store.agent)) continue
     findings.push({

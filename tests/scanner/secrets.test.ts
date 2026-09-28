@@ -90,3 +90,12 @@ describe('claude desktop token cache', () => {
     expect(JSON.stringify(findings)).not.toContain('xxxxxxxxxx')
   })
 })
+
+describe('claude channels', () => {
+  it('reports channel .env files as plaintext credential stores', async () => {
+    box = sandbox()
+    box.write('home/.claude/channels/discord/.env', 'DISCORD_BOT_TOKEN=abc\n')
+    const findings = await scanSecrets(box.ctx([agent('claude-code')]), [])
+    expect(findings.find((f) => f.title.includes('discord channel bot token'))?.severity).toBe('high')
+  })
+})

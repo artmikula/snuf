@@ -168,6 +168,8 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
     }
   }
 
+  findings.push(...claudePlugins(agent, ctx, promptsIntact))
+
   const state = rec(readJson(join(ctx.home, '.claude.json')))
   if (state?.['bypassPermissionsModeAccepted'] === true && promptsIntact) {
     findings.push({
@@ -185,6 +187,41 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
       severity: 'info',
       title: 'Claude Code prompts before running commands',
       detail: 'Default permission mode is active. Shell commands outside the allow list ask first.',
+      agent: agent.slug,
+    })
+  }
+  return findings
+}
+
+function claudePlugins(agent: Agent, ctx: ScanContext, promptsIntact: boolean): Finding[] {
+  const findings: Finding[] = []
+  const marketsPath = join(ctx.home, '.claude', 'plugins', 'known_marketplaces.json')
+  const markets = rec(readJson(marketsPath))
+  const thirdParty = Object.entries(markets ?? {}).filter(([name]) => name !== 'claude-plugins-official')
+  if (thirdParty.length > 0) {
+    const installed = rec(rec(readJson(join(ctx.home, '.claude', 'plugins', 'installed_plugins.json')))?.['plugins'])
+    const fromThirdParty = Object.keys(installed ?? {}).filter((k) => thirdParty.some(([name]) => k.endsWith(`@${name}`)))
+    findings.push({
+      category: 'shell',
+      severity: fromThirdParty.length > 0 ? 'medium' : 'low',
+      title: `${thirdParty.length} third party Claude Code plugin marketplace${thirdParty.length > 1 ? 's' : ''}${fromThirdParty.length > 0 ? `, ${fromThirdParty.length} plugin${fromThirdParty.length > 1 ? 's' : ''} installed` : ''}`,
+      detail: `${marketsPath.replace(ctx.home, '~')}: ${thirdParty.map(([name, v]) => `${name} (${String(rec(rec(v)?.['source'])?.['repo'] ?? rec(rec(v)?.['source'])?.['source'] ?? 'unknown source')})`).join(', ')}.${fromThirdParty.length > 0 ? ` Installed from them: ${fromThirdParty.slice(0, 4).join(', ')}.` : ''} Plugins run skills, hooks and MCP servers with full trust. Plugin4Shell (Sept 2026) showed the pinned SHA was not verified on checkout, so whoever controls the marketplace repo controls what runs.`,
+      path: marketsPath,
+      agent: agent.slug,
+    })
+  }
+  let channels: string[] = []
+  try {
+    channels = fg.sync('.claude/channels/*/', { cwd: ctx.home, dot: true, onlyDirectories: true, suppressErrors: true }).map((d) => d.split('/').filter(Boolean).at(-1) ?? d)
+  } catch {
+    channels = []
+  }
+  if (channels.length > 0) {
+    findings.push({
+      category: 'shell',
+      severity: promptsIntact ? 'medium' : 'high',
+      title: `Claude Code can be driven from ${channels.join(', ')}`,
+      detail: `~/.claude/channels has ${channels.join(' and ')} configured. Anyone on the allowlist for that bot can send prompts to a running session on this machine.${promptsIntact ? ' Permission prompts still apply, so the sender cannot run commands without you approving.' : ' With prompts off, a message from an allowlisted sender is a shell on this machine.'}`,
       agent: agent.slug,
     })
   }

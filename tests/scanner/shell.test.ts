@@ -431,3 +431,19 @@ describe('scanShell cursor hooks', () => {
     expect(findings.find((f) => f.title.includes('1 Cursor hook '))?.severity).toBe('low')
   })
 })
+
+describe('scanShell claude plugins and channels', () => {
+  it('flags third party marketplaces and channels', async () => {
+    box = sandbox()
+    box.write('home/.claude/settings.json', JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
+    box.write('home/.claude/plugins/known_marketplaces.json', JSON.stringify({ 'claude-plugins-official': { source: { source: 'github', repo: 'anthropics/claude-plugins-official' } }, 'random-market': { source: { source: 'github', repo: 'someone/market' } } }))
+    box.write('home/.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: { 'superpowers@claude-plugins-official': [{}], 'thing@random-market': [{}] } }))
+    box.write('home/.claude/channels/telegram/.env', 'TELEGRAM_BOT_TOKEN=123456:ABCDEFabcdef1234567890abcdefABCDEF12\n')
+    const { findings } = await scanShell(box.ctx([agent('claude-code')]))
+    const market = findings.find((f) => f.title.includes('marketplace'))
+    expect(market?.severity).toBe('medium')
+    expect(market?.detail).toContain('someone/market')
+    expect(market?.detail).toContain('thing@random-market')
+    expect(findings.find((f) => f.title.includes('driven from telegram'))?.severity).toBe('high')
+  })
+})
