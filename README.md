@@ -26,6 +26,7 @@ Read only. Zero network calls. No account, no API key, no AI model involved. It 
 - **Git config.** The GitSpawn attack: a cloned repo's own `.git/config` can set `core.fsmonitor` to a command, and the moment an agent runs `git status` it executes, before any trust prompt and outside any sandbox. snuf reads the project's `.git/config` for that key and for every other setting that names a program (hooksPath, sshCommand, shell aliases, filters, diff drivers), and tells you if an installed agent is below the patched version.
 - **CI workflows.** Agent actions in `.github/workflows` that run on issue or PR text from strangers, let any GitHub account prompt the agent, hold write permissions or secrets, or float on a tag instead of a commit SHA. The June 2026 Claude Code Action secret leak was this exact shape.
 - **OpenClaw.** Gateway bound beyond localhost, auth turned off, relaxed origin checks, and versions behind the last security release.
+- **Known vulnerable versions.** Installed agent versions compared against published fixes: GitSpawn (Claude Code 2.1.196, Codex 0.131.0, Goose 1.44.0), Claude Code CVE-2026-33068 and CVE-2026-35020 through 35022, Codex CVE-2025-61260, Cursor 3.0 (DuneSlide), Gemini CLI CVE-2026-12537, Kiro CVE-2026-10591, OpenCode CVE-2026-22812, Hermes CVE-2026-9352, and agents that had no GitSpawn fix at publication.
 
 ## The report
 
