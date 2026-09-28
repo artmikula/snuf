@@ -113,3 +113,12 @@ describe('mcp-remote token cache', () => {
     expect(JSON.stringify(findings)).not.toContain('zzzzzzzzzz')
   })
 })
+
+describe('credential store fix hints', () => {
+  it('tells codex users how to move to the keyring', async () => {
+    box = sandbox()
+    box.write('home/.codex/auth.json', '{"tokens":{}}')
+    const findings = await scanSecrets(box.ctx([agent('codex')]), [])
+    expect(findings.find((f) => f.title.includes('Codex CLI auth'))?.detail).toContain('cli_auth_credentials_store')
+  })
+})

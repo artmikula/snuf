@@ -9,13 +9,14 @@ interface CredentialStore {
   path: string
   agent: string
   label: string
+  fix?: string
 }
 
 function credentialStores(home: string): CredentialStore[] {
   const local = process.platform === 'win32' ? join(home, 'AppData', 'Local') : join(home, '.local', 'share')
   return [
-    { path: join(home, '.claude', '.credentials.json'), agent: 'claude-code', label: 'Claude Code OAuth credentials' },
-    { path: join(home, '.codex', 'auth.json'), agent: 'codex', label: 'Codex CLI auth tokens' },
+    { path: join(home, '.claude', '.credentials.json'), agent: 'claude-code', label: 'Claude Code OAuth credentials', fix: process.platform === 'darwin' ? 'On macOS this file only appears when the Keychain write failed, usually in an SSH session. Delete it and run claude login from a local terminal so the token lands in the Keychain.' : 'Linux and Windows have no keystore option for Claude Code yet. Keep the file at mode 0600 and rotate by logging out and in.' },
+    { path: join(home, '.codex', 'auth.json'), agent: 'codex', label: 'Codex CLI auth tokens', fix: 'Set cli_auth_credentials_store = "keyring" in ~/.codex/config.toml, then codex logout and codex login. The tokens move to the OS keystore and auth.json goes away.' },
     { path: join(home, '.gemini', 'oauth_creds.json'), agent: 'gemini-cli', label: 'Gemini CLI OAuth credentials' },
     { path: join(home, '.config', 'github-copilot', 'hosts.json'), agent: 'copilot', label: 'GitHub Copilot OAuth token' },
     { path: join(home, '.config', 'github-copilot', 'apps.json'), agent: 'copilot', label: 'GitHub Copilot OAuth token' },
@@ -137,7 +138,7 @@ function credentialStoreFindings(home: string, agents: ScanContext['agents']): F
       category: 'secret',
       severity: 'high',
       title: `${store.label} stored in plaintext`,
-      detail: `${store.path.replace(home, '~')} holds long lived tokens on disk. Any other agent, MCP server, or npm postinstall script running as you can read and reuse them.`,
+      detail: `${store.path.replace(home, '~')} holds long lived tokens on disk. Any other agent, MCP server, or npm postinstall script running as you can read and reuse them.${'fix' in store && store.fix ? ` ${store.fix}` : ''}`,
       path: store.path,
       agent: store.agent,
     })
