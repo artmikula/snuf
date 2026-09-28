@@ -109,6 +109,30 @@ Use them together. snuf tells you what is there and what it can reach. A server 
 
 Windows support is best effort. Config paths are checked, but process detection and version lookups are limited.
 
+## Running it in CI
+
+```yaml
+# .github/workflows/snuf.yml
+name: snuf
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx snuf --fail-on high --format markdown --output snuf-report.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snuf-report
+          path: snuf-report.md
+```
+
+In CI the useful findings are the project scoped ones: `.mcp.json` and `.cursor/mcp.json` with inline credentials, rules files that arrived in a PR, `.git/config` keys that name a program, and agent workflows that accept prompts from anyone.
+
 ## Running it on a team
 
 Have each developer run `npx snuf --format json --output snuf.json` and review the file before sharing it. Since values are masked, the JSON is safe to attach to a ticket. If you want someone to go through the results with you and write up what to change, [Centipede Software](https://centipede.dev/services/ai-agent-security-audit/) does fixed price audits built on this tool.
