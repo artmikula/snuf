@@ -189,6 +189,9 @@ function codex(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[]
     posture.reasons.push('Codex sandbox_mode is danger-full-access')
     findings.push({ category: 'shell', severity: 'high', title: 'Codex CLI sandbox is disabled', detail: `${path.replace(ctx.home, '~')} sets sandbox_mode = "danger-full-access". Commands can write anywhere and reach the network.`, path, agent: agent.slug })
   }
+  if (toml['approvals_reviewer'] === 'auto_review') {
+    findings.push({ category: 'shell', severity: 'medium', title: 'Codex CLI reviews its own approval requests', detail: `${path.replace(ctx.home, '~')} sets approvals_reviewer = "auto_review". The model decides whether to grant the sandbox escalations it asked for. You are only shown the result.`, path, agent: agent.slug })
+  }
   if (sandbox !== 'danger-full-access' && rec(toml['sandbox_workspace_write'])?.['network_access'] === true) {
     findings.push({ category: 'shell', severity: 'medium', title: 'Codex CLI sandbox allows network access', detail: `${path.replace(ctx.home, '~')} sets sandbox_workspace_write.network_access = true. Commands can reach the internet without an approval prompt, which is what an exfiltration needs.`, path, agent: agent.slug })
   }
@@ -352,6 +355,45 @@ function opencode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Findin
   return findings
 }
 
+function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const text = readText(path)
+    if (text === undefined) continue
+    const short = path.replace(ctx.home, '~')
+    const toml = parseTomlSubset(text)
+    const ui = rec(toml['ui'])
+    const sandbox = rec(toml['sandbox'])
+    const perm = rec(toml['permission'])
+    const mode = ui?.['permission_mode']
+    if (mode === 'always-approve') {
+      posture.unprompted = true
+      posture.reasons.push(`Grok Build permission_mode is always-approve in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Grok Build approves every tool call', detail: `${short} sets ui.permission_mode = "always-approve". Shell commands, edits and MCP tools run without a prompt.`, path, agent: agent.slug })
+    } else if (mode === 'auto') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Grok Build auto approves tool calls', detail: `${short} sets ui.permission_mode = "auto". The model decides what needs your approval.`, path, agent: agent.slug })
+    }
+    if (sandbox?.['auto_allow_bash'] === true) {
+      posture.unprompted = true
+      posture.reasons.push(`Grok Build sandbox.auto_allow_bash is on in ${short}`)
+      findings.push({ category: 'shell', severity: sandbox['profile'] && sandbox['profile'] !== 'off' ? 'medium' : 'high', title: 'Grok Build runs shell commands without asking', detail: `${short} sets sandbox.auto_allow_bash = true${sandbox['profile'] && sandbox['profile'] !== 'off' ? ` inside the "${String(sandbox['profile'])}" sandbox profile` : ' and the sandbox profile is off, so nothing contains those commands'}.`, path, agent: agent.slug })
+    }
+    const allow = strArr(perm?.['allow'])
+    const bashAll = allow.filter((r) => /^Bash(\(\*?\))?$/.test(r.trim()))
+    if (bashAll.length > 0) {
+      posture.unprompted = true
+      posture.reasons.push(`Grok Build permission.allow includes ${bashAll[0]} in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Grok Build pre approves every shell command', detail: `${short} permission.allow contains "${bashAll[0]}".`, path, agent: agent.slug })
+    }
+    if (ui?.['default_selected_permission'] === 'always_allow_all_sessions' && findings.length === 0) {
+      findings.push({ category: 'shell', severity: 'low', title: 'Grok Build defaults every approval prompt to "always allow"', detail: `${short} keeps ui.default_selected_permission = "always_allow_all_sessions" (the default). One Enter on a prompt approves that tool forever. Set it to allow_once.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Grok Build prompts before tool calls by default and its sandbox profile is off unless set in ~/.grok/config.toml. Note the default prompt selection is "always allow for all sessions".'))
+  return findings
+}
+
 function kimi(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.kimi-code', 'config.toml'), join(ctx.project, '.kimi-code', 'local.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -476,6 +518,9 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         break
       case 'kimi-code':
         findings.push(...kimi(agent, ctx, posture))
+        break
+      case 'grok':
+        findings.push(...grok(agent, ctx, posture))
         break
       case 'claude-desktop':
         break

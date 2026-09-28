@@ -174,3 +174,27 @@ describe('scanShell gemini trusted folders', () => {
     expect(findings.map((f) => f.severity)).toEqual(['info'])
   })
 })
+
+describe('scanShell grok build', () => {
+  it('flags always-approve, auto_allow_bash without a sandbox, and Bash(*)', async () => {
+    box = sandbox()
+    box.write('home/.grok/config.toml', '[ui]\npermission_mode = "always-approve"\n\n[sandbox]\nprofile = "off"\nauto_allow_bash = true\n\n[permission]\nallow = ["Bash(*)", "Read(src/**)"]\n')
+    const { findings, posture } = await scanShell(box.ctx([agent('grok', 'Grok Build')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.filter((f) => f.severity === 'high')).toHaveLength(3)
+  })
+
+  it('rates auto_allow_bash inside a sandbox profile as medium', async () => {
+    box = sandbox()
+    box.write('home/.grok/config.toml', '[sandbox]\nprofile = "workspace"\nauto_allow_bash = true\n')
+    const { findings } = await scanShell(box.ctx([agent('grok', 'Grok Build')]))
+    expect(findings.find((f) => f.title.includes('without asking'))?.severity).toBe('medium')
+  })
+
+  it('reads codex approvals_reviewer', async () => {
+    box = sandbox()
+    box.write('home/.codex/config.toml', 'approvals_reviewer = "auto_review"\n')
+    const { findings } = await scanShell(box.ctx([agent('codex')]))
+    expect(findings.find((f) => f.title.includes('reviews its own'))?.severity).toBe('medium')
+  })
+})
