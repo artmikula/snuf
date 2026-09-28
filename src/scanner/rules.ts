@@ -36,6 +36,8 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
     { path: join(home, '.claude', 'CLAUDE.md'), agent: 'claude-code', scope: 'user' },
     { path: join(home, '.codex', 'AGENTS.md'), agent: 'codex', scope: 'user' },
     { path: join(home, '.gemini', 'GEMINI.md'), agent: 'gemini-cli', scope: 'user' },
+    { path: join(home, '.codeium', 'windsurf', 'memories', 'global_rules.md'), agent: 'windsurf', scope: 'user' },
+    { path: join(home, '.cursor', 'rules', 'user.mdc'), agent: 'cursor', scope: 'user' },
     { path: join(home, '.config', 'opencode', 'AGENTS.md'), agent: 'opencode', scope: 'user' },
     { path: join(home, '.openclaw', 'workspace', 'SOUL.md'), agent: 'openclaw', scope: 'user' },
     { path: join(home, '.openclaw', 'workspace', 'AGENTS.md'), agent: 'openclaw', scope: 'user' },
@@ -63,6 +65,8 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
   const patterns: Array<[string, string, string, RuleFile['scope']]> = [
     [project, '.cursor/rules/**/*.{mdc,md}', 'cursor', 'project'],
     [project, '.windsurf/rules/**/*.md', 'windsurf', 'project'],
+    [project, '.windsurf/workflows/**/*.md', 'windsurf', 'project'],
+    [home, '.codeium/windsurf/memories/**/*.md', 'windsurf', 'user'],
     [project, '.clinerules/**/*.md', 'cline', 'project'],
     [project, '.roo/rules*/**/*.md', 'roo-code', 'project'],
     [project, '.kiro/steering/**/*.md', 'kiro', 'project'],

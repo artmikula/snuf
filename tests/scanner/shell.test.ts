@@ -304,3 +304,40 @@ describe('scanShell antigravity', () => {
     expect(findings[0]!.severity).toBe('medium')
   })
 })
+
+describe('scanShell codex execution policy', () => {
+  it('parses prefix_rule files and rates them', async () => {
+    box = sandbox()
+    box.write('home/.codex/config.toml', 'approval_policy = "on-request"\n')
+    box.write('home/.codex/rules/default.rules', `prefix_rule(
+    pattern = ["gh", "pr", "view"],
+    decision = "allow",
+    match = ["gh pr view 7888"],
+)
+
+prefix_rule(
+    pattern = ["curl"],
+    decision = "allow",
+)
+
+prefix_rule(
+    pattern = ["rm", "-rf"],
+    decision = "deny",
+)
+`)
+    const { findings } = await scanShell(box.ctx([agent('codex')]))
+    const risky = findings.find((f) => f.title.includes('risky command prefix'))
+    expect(risky?.severity).toBe('medium')
+    expect(risky?.detail).toContain('curl')
+    expect(risky?.detail).not.toContain('rm -rf')
+  })
+
+  it('flags a bare shell allow as high', async () => {
+    box = sandbox()
+    box.write('home/work/app/.codex/rules/team.rules', 'prefix_rule(pattern = ["bash"], decision = "allow")\n')
+    box.write('home/.codex/config.toml', '')
+    const { findings, posture } = await scanShell(box.ctx([agent('codex')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.find((f) => f.title.includes('bare shell'))?.severity).toBe('high')
+  })
+})

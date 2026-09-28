@@ -219,6 +219,57 @@ function claudeSandbox(agent: Agent, settings: Record<string, unknown>, path: st
   return findings
 }
 
+interface CodexRule {
+  pattern: string[]
+  decision: string
+}
+
+export function parseCodexRules(text: string): CodexRule[] {
+  const rules: CodexRule[] = []
+  for (const m of text.matchAll(/prefix_rule\s*\(([\s\S]*?)\)\s*(?=\n|$)/g)) {
+    const body = m[1]!
+    const pattern = body.match(/pattern\s*=\s*\[([^\]]*)\]/)?.[1] ?? ''
+    const decision = body.match(/decision\s*=\s*["'](\w+)["']/)?.[1] ?? 'prompt'
+    rules.push({ pattern: pattern.split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean), decision })
+  }
+  return rules
+}
+
+const RISKY_PREFIX = /^(curl|wget|sudo|rm|chmod|chown|ssh|scp|rsync|eval|nc|python3?|node|npx|docker)$/
+
+function codexRules(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const findings: Finding[] = []
+  const dirs = [join(ctx.home, '.codex', 'rules'), join(ctx.project, '.codex', 'rules')]
+  for (const dir of dirs) {
+    let files: string[] = []
+    try {
+      files = fg.sync('*.rules', { cwd: dir, absolute: true, suppressErrors: true })
+    } catch {
+      continue
+    }
+    for (const path of files) {
+      const text = readText(path)
+      if (text === undefined) continue
+      const short = path.replace(ctx.home, '~')
+      const allows = parseCodexRules(text).filter((r) => r.decision === 'allow')
+      const shells = allows.filter((r) => r.pattern.length === 1 && /^(bash|sh|zsh|\*)$/.test(r.pattern[0]!))
+      if (shells.length > 0) {
+        posture.unprompted = true
+        posture.reasons.push(`Codex execution policy allows ${shells[0]!.pattern[0]} in ${short}`)
+        findings.push({ category: 'shell', severity: 'high', title: 'Codex CLI execution policy allows a bare shell', detail: `${short} allows "${shells[0]!.pattern.join(' ')}" with no further prefix. Anything after it runs outside the sandbox without a prompt.`, path, agent: agent.slug })
+        continue
+      }
+      const risky = allows.filter((r) => RISKY_PREFIX.test(r.pattern[0] ?? '') || (r.pattern[0] === 'git' && r.pattern[1] === 'push') || (r.pattern[0] === 'npm' && r.pattern[1] === 'publish'))
+      if (risky.length > 0) {
+        findings.push({ category: 'shell', severity: 'medium', title: `Codex CLI execution policy pre approves ${risky.length} risky command prefix${risky.length > 1 ? 'es' : ''}`, detail: `${short}: ${risky.slice(0, 6).map((r) => r.pattern.join(' ')).join(', ')}. These run outside the sandbox without a prompt.`, path, agent: agent.slug })
+      } else if (allows.length > 0) {
+        findings.push({ category: 'shell', severity: 'info', title: `Codex CLI execution policy pre approves ${allows.length} command prefix${allows.length > 1 ? 'es' : ''}`, detail: `${short}: ${allows.slice(0, 8).map((r) => r.pattern.join(' ')).join(', ')}${allows.length > 8 ? ' and more' : ''}.`, path, agent: agent.slug })
+      }
+    }
+  }
+  return findings
+}
+
 function codex(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const path = join(ctx.home, '.codex', 'config.toml')
   const text = readText(path)
@@ -239,6 +290,7 @@ function codex(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[]
     posture.reasons.push('Codex sandbox_mode is danger-full-access')
     findings.push({ category: 'shell', severity: 'high', title: 'Codex CLI sandbox is disabled', detail: `${path.replace(ctx.home, '~')} sets sandbox_mode = "danger-full-access". Commands can write anywhere and reach the network.`, path, agent: agent.slug })
   }
+  findings.push(...codexRules(agent, ctx, posture))
   if (toml['approvals_reviewer'] === 'auto_review') {
     findings.push({ category: 'shell', severity: 'medium', title: 'Codex CLI reviews its own approval requests', detail: `${path.replace(ctx.home, '~')} sets approvals_reviewer = "auto_review". The model decides whether to grant the sandbox escalations it asked for. You are only shown the result.`, path, agent: agent.slug })
   }
