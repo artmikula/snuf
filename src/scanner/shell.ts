@@ -327,6 +327,52 @@ function opencode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Findin
   return findings
 }
 
+function kimi(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.kimi-code', 'config.toml'), join(ctx.project, '.kimi-code', 'local.toml')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const text = readText(path)
+    if (text === undefined) continue
+    const short = path.replace(ctx.home, '~')
+    const toml = parseTomlSubset(text)
+    const perm = rec(toml['permission'])
+    if (perm?.['default_permission_mode'] === 'yolo' || toml['default_permission_mode'] === 'yolo') {
+      posture.unprompted = true
+      posture.reasons.push(`Kimi Code default_permission_mode is yolo in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Kimi Code runs in yolo mode', detail: `${short} sets default_permission_mode = "yolo". Every tool call, including shell, is auto approved.`, path, agent: agent.slug })
+    }
+    if (perm?.['dangerous_command_guard'] === false) {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Kimi Code dangerous command guard is off', detail: `${short} sets permission.dangerous_command_guard = false. rm -rf style commands no longer get a confirmation.`, path, agent: agent.slug })
+    }
+    const allowAll = text.split('[[permission.rules]]').slice(1).filter((block) => /decision\s*=\s*"allow"/.test(block) && /pattern\s*=\s*"(Bash|Shell|\*)(\(\*?\))?"/.test(block))
+    if (allowAll.length > 0) {
+      posture.unprompted = true
+      posture.reasons.push(`Kimi Code permission rule allows Bash in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Kimi Code pre approves every shell command', detail: `${short} has a permission rule with decision = "allow" for Bash.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'info', 'Kimi Code prompts before tool calls (manual mode) and guards dangerous commands by default.'))
+  return findings
+}
+
+function hermes(agent: Agent, ctx: ScanContext): Finding[] {
+  const path = join(ctx.home, '.hermes', 'config.yaml')
+  const text = readText(path)
+  const findings: Finding[] = []
+  if (text !== undefined) {
+    if (/dangerous_command_approval:\s*false/.test(text)) {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Hermes Agent dangerous command approval is off', detail: '~/.hermes/config.yaml sets agent.dangerous_command_approval: false. Commands like rm -rf run without a prompt.', path, agent: agent.slug })
+    }
+    const backend = text.match(/^\s*backend:\s*["']?(\w+)/m)?.[1]
+    if (backend && backend !== 'local') {
+      findings.push({ category: 'shell', severity: 'info', title: `Hermes Agent runs commands in a ${backend} sandbox`, detail: `terminal.backend is "${backend}", so shell commands do not run directly on this machine.`, path, agent: agent.slug })
+      return findings
+    }
+  }
+  findings.push(generic(agent, 'medium', 'Hermes Agent runs as a long lived process with shell, browser and messaging tools on this machine (terminal.backend local). Secrets live in ~/.hermes/.env, which every tool it runs can read.'))
+  return findings
+}
+
 function factory(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [
     join(ctx.home, '.factory', 'settings.json'),
@@ -401,7 +447,10 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         findings.push(...factory(agent, ctx, posture))
         break
       case 'hermes':
-        findings.push(generic(agent, 'medium', 'Hermes Agent runs as a long lived process with shell, browser and messaging tools. Secrets live in ~/.hermes/.env, which every tool it runs can read.'))
+        findings.push(...hermes(agent, ctx))
+        break
+      case 'kimi-code':
+        findings.push(...kimi(agent, ctx, posture))
         break
       case 'claude-desktop':
         break

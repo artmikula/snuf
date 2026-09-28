@@ -92,6 +92,26 @@ describe('scanShell cursor cli and opencode', () => {
   })
 })
 
+describe('scanShell kimi and hermes', () => {
+  it('reads Kimi Code yolo mode and allow rules', async () => {
+    box = sandbox()
+    box.write('home/.kimi-code/config.toml', '[permission]\ndefault_permission_mode = "yolo"\ndangerous_command_guard = false\n\n[[permission.rules]]\ndecision = "allow"\npattern = "Bash"\nscope = "user"\n')
+    const { findings, posture } = await scanShell(box.ctx([agent('kimi-code', 'Kimi Code')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.map((f) => f.severity).sort()).toEqual(['high', 'high', 'medium'])
+  })
+
+  it('reports Hermes sandbox backend as info and local as medium', async () => {
+    box = sandbox()
+    box.write('home/.hermes/config.yaml', 'terminal:\n  backend: docker\n')
+    const sandboxed = await scanShell(box.ctx([agent('hermes', 'Hermes Agent')]))
+    expect(sandboxed.findings[0]!.severity).toBe('info')
+    box.write('home/.hermes/config.yaml', 'agent:\n  dangerous_command_approval: false\nterminal:\n  backend: local\n')
+    const local = await scanShell(box.ctx([agent('hermes', 'Hermes Agent')]))
+    expect(local.findings.map((f) => f.severity)).toEqual(['medium', 'medium'])
+  })
+})
+
 describe('scanShell openclaw and factory', () => {
   it('flags an exposed unauthenticated OpenClaw gateway as critical', async () => {
     box = sandbox()
