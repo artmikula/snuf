@@ -189,8 +189,30 @@ function claudeDesktopFindings(home: string, agents: ScanContext['agents']): Fin
   }]
 }
 
+function mcpRemoteFindings(home: string, servers: McpServer[]): Finding[] {
+  const dir = process.env['MCP_REMOTE_CONFIG_DIR'] ?? join(home, '.mcp-auth')
+  if (!existsSync(dir)) return []
+  let files: string[] = []
+  try {
+    files = fg.sync('**/*.json', { cwd: dir, dot: true, suppressErrors: true })
+  } catch {
+    return []
+  }
+  const tokens = files.filter((f) => /token/i.test(f))
+  if (tokens.length === 0) return []
+  const users = [...new Set(servers.filter((s) => (s.args ?? []).some((a) => a === 'mcp-remote' || a.startsWith('mcp-remote@'))).map((s) => s.agent))]
+  return [{
+    category: 'secret',
+    severity: 'high',
+    title: `mcp-remote OAuth tokens stored in plaintext (${tokens.length} server${tokens.length > 1 ? 's' : ''})`,
+    detail: `${dir.replace(home, '~')} caches the OAuth access and refresh tokens mcp-remote obtains for remote MCP servers${users.length ? `, used by ${users.join(', ')}` : ''}. Any process running as you can reuse them against those services.`,
+    path: dir,
+  }]
+}
+
 export async function scanSecrets(ctx: ScanContext, servers: McpServer[]): Promise<Finding[]> {
   return [
+    ...mcpRemoteFindings(ctx.home, servers),
     ...claudeDesktopFindings(ctx.home, ctx.agents),
     ...mcpSecretFindings(servers, ctx.project),
     ...environmentFindings(ctx.agents),

@@ -99,3 +99,17 @@ describe('claude channels', () => {
     expect(findings.find((f) => f.title.includes('discord channel bot token'))?.severity).toBe('high')
   })
 })
+
+describe('mcp-remote token cache', () => {
+  it('flags token files under ~/.mcp-auth', async () => {
+    box = sandbox()
+    box.write('home/.mcp-auth/mcp-remote-0.1.0/abc_tokens.json', JSON.stringify({ access_token: 'ya29.' + 'z'.repeat(60) }))
+    box.write('home/.mcp-auth/mcp-remote-0.1.0/abc_client_info.json', '{}')
+    const findings = await scanSecrets(box.ctx([agent('cursor')]), [server({ name: 'linear', command: 'npx', args: ['-y', 'mcp-remote', 'https://mcp.linear.app/sse'], agent: 'cursor' })])
+    const hit = findings.find((f) => f.title.includes('mcp-remote'))
+    expect(hit?.severity).toBe('high')
+    expect(hit?.title).toContain('1 server')
+    expect(hit?.detail).toContain('cursor')
+    expect(JSON.stringify(findings)).not.toContain('zzzzzzzzzz')
+  })
+})

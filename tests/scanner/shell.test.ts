@@ -465,3 +465,12 @@ describe('scanShell claude plugins and channels', () => {
     expect(findings.find((f) => f.title.includes('driven from telegram'))?.severity).toBe('high')
   })
 })
+
+describe('scanShell opencode share', () => {
+  it('flags auto share', async () => {
+    box = sandbox()
+    box.write('home/.config/opencode/opencode.json', JSON.stringify({ share: 'auto' }))
+    const { findings } = await scanShell(box.ctx([agent('opencode', 'OpenCode')]))
+    expect(findings.find((f) => f.title.includes('public link'))?.severity).toBe('medium')
+  })
+})

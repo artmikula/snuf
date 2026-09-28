@@ -506,7 +506,11 @@ function opencode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Findin
   const files = [join(ctx.home, '.config', 'opencode', 'opencode.json'), join(ctx.project, 'opencode.json')].filter((p) => existsSync(p))
   const findings: Finding[] = []
   for (const path of files) {
-    const perm = rec(rec(readJson(path))?.['permission'])
+    const cfg = rec(readJson(path))
+    if (cfg?.['share'] === 'auto') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'OpenCode shares every session to a public link', detail: `${path.replace(ctx.home, '~')} sets share to "auto". Each conversation, including any secret the model reads aloud, gets a public opencode.ai URL, and shared sessions cannot be deleted.`, path, agent: agent.slug })
+    }
+    const perm = rec(cfg?.['permission'])
     if (!perm) continue
     const short = path.replace(ctx.home, '~')
     const all = opencodePermission(perm['*'])
