@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Finding, McpServer, ScanContext } from '../types.js'
-import { readJson, readText, parseEnvFile, walkStrings } from './config-parsers.js'
+import { readJson, readText, parseEnvFile, walkStrings, isTrackedInGit } from './config-parsers.js'
 import { classifySecret, classifyValue } from './secret-patterns.js'
 
 interface CredentialStore {
@@ -41,9 +41,13 @@ function stateFiles(home: string): CredentialStore[] {
   ]
 }
 
-function mcpSecretFindings(servers: McpServer[]): Finding[] {
+function mcpSecretFindings(servers: McpServer[], project: string): Finding[] {
   const findings: Finding[] = []
+  const committed = new Map<string, string[]>()
   for (const server of servers) {
+    if (server.secretKeys.length > 0 && isTrackedInGit(project, server.sourcePath)) {
+      committed.set(server.sourcePath, [...(committed.get(server.sourcePath) ?? []), ...server.secretKeys.map((k) => k.replace(/^header:/, ''))])
+    }
     for (const key of server.secretKeys) {
       const isHeader = key.startsWith('header:')
       const name = isHeader ? key.slice(7) : key
@@ -57,6 +61,15 @@ function mcpSecretFindings(servers: McpServer[]): Finding[] {
         agent: server.agent,
       })
     }
+  }
+  for (const [path, keys] of committed) {
+    findings.push({
+      category: 'secret',
+      severity: 'critical',
+      title: `MCP config with ${keys.length} credential${keys.length > 1 ? 's' : ''} is committed to git`,
+      detail: `${path.replace(project, '.')} is tracked by this repository and holds ${keys.join(', ')}. If the remote is public, or ever becomes public, these are leaked. GitGuardian found 24,008 secrets in public MCP config files in 2026. Remove the values, rotate them, and purge the history.`,
+      path,
+    })
   }
   return findings
 }
@@ -93,11 +106,12 @@ function envFileFindings(home: string, project: string): Finding[] {
       .filter((h) => h.match)
     if (hits.length === 0) continue
     const inHome = path.startsWith(home) && !path.startsWith(project)
+    const tracked = !inHome && isTrackedInGit(project, path)
     findings.push({
       category: 'secret',
-      severity: inHome || hits.length >= 3 ? 'high' : 'medium',
-      title: `${hits.length} credential${hits.length > 1 ? 's' : ''} in ${path.replace(home, '~')}`,
-      detail: `${hits.map((h) => h.key).join(', ')}. Any agent working in this directory can read this file, and most will, since .env files are rarely in their deny lists.`,
+      severity: tracked ? 'critical' : inHome || hits.length >= 3 ? 'high' : 'medium',
+      title: tracked ? `${path.replace(project, '.')} with ${hits.length} credential${hits.length > 1 ? 's' : ''} is committed to git` : `${hits.length} credential${hits.length > 1 ? 's' : ''} in ${path.replace(home, '~')}`,
+      detail: `${hits.map((h) => h.key).join(', ')}. ${tracked ? 'This file is tracked by the repository, so every clone and every agent that reads the repo has these values. Add it to .gitignore, rotate the keys, and purge the history.' : 'Any agent working in this directory can read this file, and most will, since .env files are rarely in their deny lists.'}`,
       path,
     })
   }
@@ -145,7 +159,7 @@ function credentialStoreFindings(home: string, agents: ScanContext['agents']): F
 
 export async function scanSecrets(ctx: ScanContext, servers: McpServer[]): Promise<Finding[]> {
   return [
-    ...mcpSecretFindings(servers),
+    ...mcpSecretFindings(servers, ctx.project),
     ...environmentFindings(ctx.agents),
     ...envFileFindings(ctx.home, ctx.project),
     ...credentialStoreFindings(ctx.home, ctx.agents),

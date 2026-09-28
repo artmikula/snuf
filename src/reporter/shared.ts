@@ -32,6 +32,9 @@ export function recommendations(result: ScanResult): string[] {
   if (has((f) => f.category === 'git' && f.title.includes('vulnerable to GitSpawn'))) {
     recs.push('Update the agents flagged for GitSpawn. Until then inspect .git/config in every repo you clone.')
   }
+  if (has((f) => f.category === 'secret' && f.title.includes('committed to git'))) {
+    recs.push('Rotate every credential in the files committed to git, then purge them from history. Assume they are already copied.')
+  }
   if (has((f) => f.category === 'secret' && f.title.includes('MCP config'))) {
     recs.push('Move credentials out of MCP config files. Reference them by name (${VAR}) or use the agent keychain.')
   }

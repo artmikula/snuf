@@ -495,6 +495,7 @@ function toServer(raw: RawServer, source: ConfigSource): McpServer {
     hasShellAccess: stdio && runsLocalCode(raw.command),
     isKnown: isTrusted(raw.command, raw.args, raw.url),
     source: source.label,
+    sourcePath: source.path,
   }
 }
 

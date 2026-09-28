@@ -147,6 +147,7 @@ Scan agent configs and environment for:
 - Tokens in environment variables that agents inherit
 - `.env` files in directories agents can access
 - SSH keys, AWS credentials in default locations
+- Project `.env` and MCP config files that hold credentials AND are tracked by git (`git ls-files`) → `critical`
 
 ### 6. Git config (GitSpawn, Sept 2026)
 A repo's own `.git/config` can name a program in `core.fsmonitor`; agents run it via background `git status`. Scan the project `.git/config` for fsmonitor and every other key that names a program (hooksPath, sshCommand, `!` aliases, filters, diff/merge drivers, includes). Flag agents below patched versions (Claude Code 2.1.196, Codex 0.131.0, Goose 1.44.0) and those unpatched at publication (Hermes, Qwen Code, Grok Build).

@@ -26,6 +26,7 @@ export interface McpServer {
   hasShellAccess: boolean
   isKnown: boolean
   source: string
+  sourcePath: string
 }
 
 export type FindingCategory = 'agent' | 'mcp' | 'secret' | 'file-access' | 'shell' | 'rules' | 'git' | 'ci'

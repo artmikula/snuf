@@ -7,7 +7,7 @@ import type { ScanResult } from '../../src/types.js'
 const result: ScanResult = {
   version: '0.0.0',
   agents: [{ name: 'Claude Code', slug: 'claude-code', running: true, configPaths: ['/home/u/.claude'] }],
-  mcpServers: [{ name: 'x', agent: 'cursor', transport: 'stdio', command: 'npx', args: ['x'], envVars: { KEY: 'abcd…yz (40 chars)' }, secretKeys: ['KEY'], hasNetworkAccess: false, hasShellAccess: true, isKnown: false, source: '~/.cursor/mcp.json' }],
+  mcpServers: [{ name: 'x', agent: 'cursor', transport: 'stdio', command: 'npx', args: ['x'], envVars: { KEY: 'abcd…yz (40 chars)' }, secretKeys: ['KEY'], hasNetworkAccess: false, hasShellAccess: true, isKnown: false, source: '~/.cursor/mcp.json', sourcePath: '/x/.cursor/mcp.json' }],
   findings: [
     { category: 'secret', severity: 'critical', title: 'KEY stored in plaintext in MCP config (x)', detail: 'd' },
     { category: 'shell', severity: 'info', title: 'Claude Code prompts before running commands', detail: 'd' },

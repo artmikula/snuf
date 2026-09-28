@@ -7,7 +7,7 @@ let box: Sandbox
 afterEach(() => box?.cleanup())
 
 const server = (over: Partial<McpServer>): McpServer => ({
-  name: 's', agent: 'cursor', transport: 'stdio', secretKeys: [], hasNetworkAccess: false, hasShellAccess: true, isKnown: false, source: '~/.cursor/mcp.json', ...over,
+  name: 's', agent: 'cursor', transport: 'stdio', secretKeys: [], hasNetworkAccess: false, hasShellAccess: true, isKnown: false, source: '~/.cursor/mcp.json', sourcePath: '/nonexistent/.cursor/mcp.json', ...over,
 })
 
 describe('scanSecrets', () => {
@@ -46,5 +46,35 @@ describe('scanSecrets', () => {
     expect(hit.detail).toContain('oauth.accessToken')
     expect(hit.detail).not.toContain('mcpServers')
     expect(JSON.stringify(findings)).not.toContain('rrrrrrrrrr')
+  })
+})
+
+describe('scanSecrets git tracked files', () => {
+  it('flags .env and MCP configs that are committed to the repository', async () => {
+    const { execFileSync } = await import('node:child_process')
+    const { scanMcpServers } = await import('../../src/scanner/mcp.js')
+    box = sandbox()
+    box.write('home/work/app/.env', 'OPENAI_API_KEY=sk-proj-' + 'q'.repeat(40) + '\n')
+    box.write('home/work/app/.cursor/mcp.json', JSON.stringify({ mcpServers: { x: { command: 'node', args: ['x.js'], env: { OPENAI_API_KEY: 'sk-proj-' + 'z'.repeat(40) } } } }))
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: box.project, stdio: 'ignore' })
+    git('init', '-q')
+    git('add', '.env', '.cursor/mcp.json')
+    const { servers } = await scanMcpServers(box.ctx())
+    const findings = await scanSecrets(box.ctx([agent('cursor')]), servers)
+    const env = findings.find((f) => f.title.includes('.env') && f.title.includes('committed'))
+    expect(env?.severity).toBe('critical')
+    const mcp = findings.find((f) => f.title.includes('MCP config with') && f.title.includes('committed'))
+    expect(mcp?.severity).toBe('critical')
+    expect(mcp?.detail).toContain('OPENAI_API_KEY')
+  })
+
+  it('does not flag untracked files as committed', async () => {
+    const { execFileSync } = await import('node:child_process')
+    box = sandbox()
+    box.write('home/work/app/.env', 'OPENAI_API_KEY=sk-proj-' + 'q'.repeat(40) + '\n')
+    execFileSync('git', ['init', '-q'], { cwd: box.project, stdio: 'ignore' })
+    const findings = await scanSecrets(box.ctx([agent('cursor')]), [])
+    expect(findings.some((f) => f.title.includes('committed'))).toBe(false)
+    expect(findings.some((f) => f.title.includes('1 credential in'))).toBe(true)
   })
 })

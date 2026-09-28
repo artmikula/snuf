@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { join, relative } from 'node:path'
 
 export function readText(path: string, maxBytes = 2_000_000): string | undefined {
   try {
@@ -159,4 +161,26 @@ export function walkStrings(
       walkStrings(v, visit, path ? `${path}.${k}` : k, depth + 1)
     }
   }
+}
+
+const trackedCache = new Map<string, Set<string>>()
+
+export function gitTrackedFiles(project: string): Set<string> {
+  const cached = trackedCache.get(project)
+  if (cached) return cached
+  let files = new Set<string>()
+  try {
+    const out = execFileSync('git', ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '--cached'], { cwd: project, timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString()
+    files = new Set(out.split('\0').filter(Boolean).map((f) => join(project, f)))
+  } catch {
+    files = new Set()
+  }
+  trackedCache.set(project, files)
+  return files
+}
+
+export function isTrackedInGit(project: string, path: string): boolean {
+  const rel = relative(project, path)
+  if (rel.startsWith('..')) return false
+  return gitTrackedFiles(project).has(path)
 }
