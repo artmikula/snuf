@@ -703,6 +703,101 @@ function zed(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   return findings
 }
 
+function yamlList(text: string, key: string): string[] {
+  const block = text.match(new RegExp(`^${key}:\\s*\\n((?:[ \\t]+-.*\\n?)+)`, 'm'))?.[1]
+  if (block) return block.split('\n').map((l) => l.replace(/^\s*-\s*/, '').trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+  const inline = text.match(new RegExp(`^${key}:\\s*\\[(.*)\\]`, 'm'))?.[1]
+  return inline ? inline.split(',').map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean) : []
+}
+
+function continueCli(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const path = join(ctx.home, '.continue', 'permissions.yaml')
+  const text = readText(path)
+  const findings: Finding[] = []
+  if (text !== undefined) {
+    const short = path.replace(ctx.home, '~')
+    const allow = yamlList(text, 'allow')
+    const bashAll = allow.filter((r) => /^Bash(\(\*?\))?$/.test(r))
+    const risky = allow.filter((r) => /^Bash\([^)]*(curl|wget|sudo|rm|chmod|ssh|scp|eval|npm publish|git push)/.test(r))
+    if (bashAll.length > 0) {
+      posture.unprompted = true
+      posture.reasons.push(`Continue permissions allow ${bashAll[0]}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Continue CLI pre approves every shell command', detail: `${short} allow list contains "${bashAll[0]}". The TUI writes entries here when you pick "always allow".`, path, agent: agent.slug })
+    } else if (risky.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: `Continue CLI pre approves ${risky.length} risky shell pattern${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+    }
+    if (allow.some((r) => /^Write(\(\*?\))?$/.test(r)) && findings.length === 0) {
+      findings.push({ category: 'shell', severity: 'low', title: 'Continue CLI writes files without asking', detail: `${short} allows Write for every path.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Continue asks per tool unless started with --auto. Persistent approvals accumulate in ~/.continue/permissions.yaml as you click "always allow".'))
+  return findings
+}
+
+function vibe(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.vibe', 'config.toml'), join(ctx.project, '.vibe', 'config.toml')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const text = readText(path)
+    if (text === undefined) continue
+    const short = path.replace(ctx.home, '~')
+    const toml = parseTomlSubset(text)
+    const agentName = toml['agent'] ?? toml['default_agent']
+    if (agentName === 'auto-approve') {
+      posture.unprompted = true
+      posture.reasons.push(`Vibe default agent is auto-approve in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Mistral Vibe auto approves every tool call', detail: `${short} sets the default agent to "auto-approve". Mistral's own docs say to reserve this for disposable environments without SSH keys or cloud credentials.`, path, agent: agent.slug })
+    } else if (agentName === 'accept-edits') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Mistral Vibe auto approves file edits', detail: `${short} sets the default agent to "accept-edits".`, path, agent: agent.slug })
+    }
+  }
+  const trustPath = join(ctx.home, '.vibe', 'trusted_folders.toml')
+  const trustText = readText(trustPath)
+  if (trustText !== undefined) {
+    const home = ctx.home.replace(/[\\/]+$/, '')
+    const trusted = [...trustText.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]!).filter((f) => isHomeOrAncestor(f, home))
+    if (trusted.length > 0) {
+      findings.push({ category: 'shell', severity: 'high', title: 'Mistral Vibe trusts your home directory', detail: `${trustPath.replace(ctx.home, '~')} lists ${trusted.join(', ')}. Every folder under it skips the trust prompt.`, path: trustPath, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Mistral Vibe uses the "ask" agent by default. --yolo or agent = "auto-approve" in ~/.vibe/config.toml removes every prompt.'))
+  return findings
+}
+
+function qwen(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.qwen', 'settings.json'), join(ctx.project, '.qwen', 'settings.json')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const settings = rec(readJson(path))
+    if (!settings) continue
+    const short = path.replace(ctx.home, '~')
+    const mode = rec(settings['tools'])?.['approvalMode'] ?? settings['approvalMode']
+    if (mode === 'yolo') {
+      posture.unprompted = true
+      posture.reasons.push(`Qwen Code approvalMode is yolo in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Qwen Code runs in YOLO mode', detail: `${short} sets tools.approvalMode to "yolo". Every tool call, including shell, is auto approved.`, path, agent: agent.slug })
+    } else if (mode === 'auto') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Qwen Code lets a classifier approve tool calls', detail: `${short} sets tools.approvalMode to "auto". An LLM decides what is safe to run.`, path, agent: agent.slug })
+    } else if (mode === 'auto-edit') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Qwen Code auto approves file edits', detail: `${short} sets tools.approvalMode to "auto-edit".`, path, agent: agent.slug })
+    }
+  }
+  const trustPath = join(ctx.home, '.qwen', 'trustedFolders.json')
+  const trust = rec(readJson(trustPath))
+  const trustMap = rec(trust?.['config']) ?? trust
+  const home = ctx.home.replace(/[\\/]+$/, '')
+  const trustedHome = Object.entries(trustMap ?? {}).filter(([folder, level]) => {
+    if (level !== 'TRUST_FOLDER' && level !== 'TRUST_PARENT') return false
+    const effective = (level === 'TRUST_PARENT' ? dirname(folder) : folder).replace(/[\\/]+$/, '')
+    return effective === home || home.startsWith(effective + '/') || effective === '/'
+  })
+  if (trustedHome.length > 0) {
+    findings.push({ category: 'shell', severity: 'high', title: 'Qwen Code trusts your home directory', detail: `${trustPath.replace(ctx.home, '~')} marks ${trustedHome.map(([f]) => f).join(', ')} as trusted, so every folder under it skips the trust prompt and yolo mode is not overridden there.`, path: trustPath, agent: agent.slug })
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Qwen Code asks before edits and shell commands (approvalMode default). Note it had no GitSpawn fix at publication.'))
+  return findings
+}
+
 function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -872,6 +967,18 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         break
       case 'zed':
         findings.push(...zed(agent, ctx, posture))
+        break
+      case 'continue':
+        findings.push(...continueCli(agent, ctx, posture))
+        break
+      case 'vibe':
+        findings.push(...vibe(agent, ctx, posture))
+        break
+      case 'qwen-code':
+        findings.push(...qwen(agent, ctx, posture))
+        break
+      case 'amazon-q':
+        findings.push(generic(agent, 'low', 'Amazon Q Developer CLI was folded into Kiro CLI in 2026 and its config was copied to ~/.kiro. If ~/.aws/amazonq is still here, its MCP servers and custom agents may be duplicated in Kiro; review both.'))
         break
       case 'openclaw':
         findings.push(...openclaw(agent, ctx, posture))

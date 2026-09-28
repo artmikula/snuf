@@ -367,3 +367,33 @@ describe('scanShell aider and zed', () => {
     expect(safe.findings[0]!.severity).toBe('low')
   })
 })
+
+describe('scanShell continue, vibe, qwen', () => {
+  it('reads Continue permissions.yaml allow lists', async () => {
+    box = sandbox()
+    box.write('home/.continue/permissions.yaml', 'allow:\n  - Read()\n  - Bash(git *)\n  - Bash(curl *)\nask:\n  - Write()\n')
+    const { findings } = await scanShell(box.ctx([agent('continue', 'Continue')]))
+    expect(findings.find((f) => f.title.includes('risky shell'))?.detail).toContain('curl')
+    box.write('home/.continue/permissions.yaml', 'allow:\n  - Bash\n')
+    const all = await scanShell(box.ctx([agent('continue', 'Continue')]))
+    expect(all.posture.unprompted).toBe(true)
+  })
+
+  it('reads Vibe default agent and trusted folders', async () => {
+    box = sandbox()
+    box.write('home/.vibe/config.toml', 'agent = "auto-approve"\n')
+    box.write('home/.vibe/trusted_folders.toml', `trusted = ["${box.home}"]\n`)
+    const { findings, posture } = await scanShell(box.ctx([agent('vibe', 'Mistral Vibe')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.filter((f) => f.severity === 'high')).toHaveLength(2)
+  })
+
+  it('reads Qwen approvalMode and trusted folders', async () => {
+    box = sandbox()
+    box.write('home/.qwen/settings.json', JSON.stringify({ tools: { approvalMode: 'yolo' } }))
+    box.write('home/.qwen/trustedFolders.json', JSON.stringify({ [box.home]: 'TRUST_FOLDER' }))
+    const { findings, posture } = await scanShell(box.ctx([agent('qwen-code', 'Qwen Code')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.map((f) => f.severity)).toEqual(['high', 'high'])
+  })
+})
