@@ -81,6 +81,16 @@ function scanWorkflow(path: string, ctx: ScanContext): Finding[] {
       })
     }
 
+    if (action.agent === 'gemini-cli' && used.ref && /^v?0\.1\.(\d+)$/.test(used.ref) && parseInt(used.ref.match(/(\d+)$/)![1]!, 10) < 22) {
+      findings.push({
+        category: 'ci',
+        severity: 'high',
+        title: 'run-gemini-cli action is below the CVE-2026-12537 fix',
+        detail: `${short} pins google-github-actions/run-gemini-cli@${used.ref}. Versions before 0.1.22 let a GitHub issue inject commands into the workflow and read its secrets (CVSS 10). Move to 0.1.22 or later.`,
+        path,
+        agent: action.agent,
+      })
+    }
     if (used.floating) {
       findings.push({
         category: 'ci',

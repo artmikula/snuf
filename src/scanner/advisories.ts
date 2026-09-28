@@ -60,6 +60,27 @@ export const ADVISORIES: Advisory[] = [
     detail: "A cloned repo's .git/config can run code through core.fsmonitor when Goose calls git status. Fixed in 1.44.0.",
   },
   {
+    slug: 'gemini-cli',
+    fixed: '0.39.1',
+    category: 'shell',
+    title: 'has a CVSS 10 command injection bug',
+    detail: 'CVE-2026-12537 (GHSA-wpqr-6v78-jr5g, April 2026): --yolo bypassed tool allowlists and a GitHub issue could drive command injection and secret exfiltration. Fixed in 0.39.1 and 0.40.0-preview.3.',
+  },
+  {
+    slug: 'kiro',
+    fixed: '0.11.0',
+    category: 'shell',
+    title: 'runs code from crafted project files',
+    detail: 'CVE-2026-4295 (fixed 0.8.0) and CVE-2026-10591 (fixed 0.11, AWS bulletin 2026-037): opening a malicious project directory or a repo that edits .vscode/tasks.json led to code execution.',
+  },
+  {
+    slug: 'hermes',
+    fixed: '2026.4.24',
+    category: 'shell',
+    title: 'has a known messaging gateway flaw',
+    detail: 'CVE-2026-9352 affects hermes-agent up to 2026.4.23 in the messaging gateway run environment.',
+  },
+  {
     slug: 'cursor',
     fixed: '3.0.0',
     category: 'shell',

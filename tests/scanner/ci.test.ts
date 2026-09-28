@@ -65,3 +65,12 @@ jobs:
     expect((await scanCi(box.ctx([], { agent: 'claude-code' }))).length).toBeGreaterThan(0)
   })
 })
+
+describe('scanCi known vulnerable action versions', () => {
+  it('flags run-gemini-cli below 0.1.22', async () => {
+    box = sandbox()
+    box.write('home/work/app/.github/workflows/g.yml', 'on: push\njobs:\n  x:\n    steps:\n      - uses: google-github-actions/run-gemini-cli@v0.1.20\n')
+    const findings = await scanCi(box.ctx())
+    expect(findings.find((f) => f.title.includes('CVE-2026-12537'))?.severity).toBe('high')
+  })
+})
