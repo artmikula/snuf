@@ -11,7 +11,7 @@ export interface AgentSpec {
   desktopApp?: boolean
 }
 
-function run(command: string, timeout = 1500): string | undefined {
+function run(command: string, timeout = 3000): string | undefined {
   try {
     return execSync(command, { timeout, stdio: ['ignore', 'pipe', 'ignore'] }).toString()
   } catch {

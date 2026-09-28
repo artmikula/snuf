@@ -11,7 +11,7 @@ Set TypingSpeed 80ms
 Set PlaybackSpeed 0.85
 
 Hide
-  Type "alias npx\ snuf=snuf"
+  Type `alias npx\ snuf="node /Users/artm/Code/snuf/dist/cli.js"`
   Enter
   Type "clear"
   Enter
