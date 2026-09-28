@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import fg from 'fast-glob'
 import type { Finding, ScanContext } from '../types.js'
 import { readText } from './config-parsers.js'
+import { compareVersions } from './git.js'
 
 interface RuleFile {
   path: string
@@ -12,8 +13,18 @@ interface RuleFile {
 
 const ZERO_WIDTH = /[​-‏⁠-⁤﻿‪-‮⁦-⁩]|[\u{E0000}-\u{E007F}]/u
 const INJECTION = /(ignore (all |any )?(previous|prior|above) instructions|do not (tell|inform|mention|reveal)( this)? to the user|without (asking|telling|informing) the user|hide this from the user|system prompt override|you are now in developer mode|(before|after) (every|each) (task|response|command)[^\n]{0,80}(send|post|upload|read))/i
-const CREDENTIAL_PATH = /(~|\$HOME|\/Users\/[^/\s]+|\/home\/[^/\s]+)\/\.(ssh|aws|gnupg|kube|netrc|git-credentials|npmrc|pypirc|config\/gh|docker\/config)|id_(rsa|ed25519|ecdsa)\b|\.aws\/credentials|\.claude\/\.credentials|\.env(\.local|\.production)?\b|credentials\.json/i
-const SENDS_OUT = /\b(post|send|upload|submit|transmit|exfiltrate|forward)\b[^\n]{0,120}(https?:\/\/|webhook|endpoint|server|url)|\bcurl\b[^\n]*(-d|--data|-F|-T|--upload-file|-X ?POST)/i
+const CREDENTIAL_PATH = /(~|\$HOME|\/Users\/[^/\s]+|\/home\/[^/\s]+)\/\.(ssh|aws|gnupg|kube|netrc|git-credentials|npmrc|pypirc|config\/gh|docker\/config\.json)|\bid_(rsa|ed25519|ecdsa)\b|\.aws\/credentials|\.claude\/\.credentials|shell history|\.(bash|zsh)_history/gi
+const SENDS_OUT = /\b(post|send|upload|submit|transmit|exfiltrate|forward)\b[^\n]{0,120}(https?:\/\/|webhook|endpoint|url)|\bcurl\b[^\n]*(-d |--data|-F |-T |--upload-file|-X ?POST)/gi
+
+function credentialExfil(text: string): { cred: string; send: string } | undefined {
+  const sends = [...text.matchAll(SENDS_OUT)]
+  if (sends.length === 0) return undefined
+  for (const cred of text.matchAll(CREDENTIAL_PATH)) {
+    const near = sends.find((s) => Math.abs((s.index ?? 0) - (cred.index ?? 0)) < 400)
+    if (near) return { cred: cred[0], send: near[0].slice(0, 60).trim() }
+  }
+  return undefined
+}
 const DOWNLOADS = /\b(curl|wget|Invoke-WebRequest|iwr|fetch)\b[^\n]*https?:\/\//i
 const PIPE_TO_SHELL = /\|\s*(sudo\s+)?(ba|z)?sh\b/
 const DANGEROUS = /\b(rm -rf|sudo |chmod \+x|chmod 777|base64 (-d|--decode)|eval\s*\(|nc -e|mkfifo|\/dev\/tcp\/|crontab|launchctl|systemctl enable|ssh-keygen|cat ~\/\.ssh|\.aws\/credentials|~\/\.netrc)/i
@@ -89,7 +100,23 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
       // unreadable directory, skip
     }
   }
-  return files
+  return latestPluginVersionsOnly(files)
+}
+
+const PLUGIN_CACHE = /^(.*\/\.claude\/plugins\/cache\/[^/]+\/[^/]+\/)([^/]+)\//
+
+function latestPluginVersionsOnly(files: RuleFile[]): RuleFile[] {
+  const latest = new Map<string, string>()
+  for (const f of files) {
+    const m = f.path.match(PLUGIN_CACHE)
+    if (!m) continue
+    const current = latest.get(m[1]!)
+    if (!current || compareVersions(m[2]!, current) > 0) latest.set(m[1]!, m[2]!)
+  }
+  return files.filter((f) => {
+    const m = f.path.match(PLUGIN_CACHE)
+    return !m || latest.get(m[1]!) === m[2]
+  })
 }
 
 interface Inspection {
@@ -111,8 +138,9 @@ function inspect(file: RuleFile, home: string, acc: Inspection): void {
   if (INJECTION.test(text)) {
     acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} contains prompt injection phrasing`, detail: `${short} matched "${text.match(INJECTION)?.[0]}". Instructions that tell the model to hide actions from you or override earlier instructions have no place in a rules file.`, path: file.path, agent: file.agent })
   }
-  if (CREDENTIAL_PATH.test(text) && SENDS_OUT.test(text)) {
-    acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} reads credentials and sends data to a remote endpoint`, detail: `${short} mentions ${text.match(CREDENTIAL_PATH)?.[0]} and also describes sending data out ("${text.match(SENDS_OUT)?.[0]?.slice(0, 60).trim()}"). Three lines of plain English in a skill are enough to exfiltrate a key. No code needed, so code scanners miss it.`, path: file.path, agent: file.agent })
+  const exfil = credentialExfil(text)
+  if (exfil) {
+    acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} reads credentials and sends data to a remote endpoint`, detail: `${short} mentions ${exfil.cred} within a few lines of sending data out ("${exfil.send}"). Three lines of plain English in a skill are enough to exfiltrate a key. No code needed, so code scanners miss it.`, path: file.path, agent: file.agent })
   }
   if (PIPE_TO_SHELL.test(text) || (DOWNLOADS.test(text) && DANGEROUS.test(text))) {
     acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} pipes downloads into a shell`, detail: `${short} contains a download piped into sh or bash, or a download next to privileged commands. The model will run it when the instruction applies.`, path: file.path, agent: file.agent })
