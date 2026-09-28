@@ -72,7 +72,7 @@ Two things changed in reporting: the markdown report footer points to the audit 
 - OpenCode `share: "auto"` (medium). mcp-remote token cache `~/.mcp-auth` or `MCP_REMOTE_CONFIG_DIR` (high). Remediation hints on the Claude Code and Codex credential store findings (`cli_auth_credentials_store = "keyring"`).
 - Claude plugins: third party marketplaces from `~/.claude/plugins/known_marketplaces.json` plus installed plugins from `installed_plugins.json`. Channels under `~/.claude/channels/*` are a remote control path, high when prompts are off, and their `.env` files are credential stores.
 - Windows: Store installed Claude Desktop config under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`.
-- 133 tests.
+- 134 tests. Advisories also cover Gemini CLI 0.39.1 (CVE-2026-12537), Kiro 0.11.0, Hermes 2026.4.24, OpenCode 1.1.10 (CVE-2026-22812/22813), Claude Code 2.1.53 (CVE-2026-33068), and the run-gemini-cli action below 0.1.22 in ci.ts.
 
 ## Known rough edges
 
