@@ -57,6 +57,41 @@ describe('scanShell', () => {
   })
 })
 
+describe('scanShell cursor cli and opencode', () => {
+  it('flags Cursor CLI unrestricted approval mode and Shell(*)', async () => {
+    box = sandbox()
+    box.write('home/.cursor/cli-config.json', JSON.stringify({ version: 1, approvalMode: 'unrestricted', permissions: { allow: ['Shell(*)'] } }))
+    const { findings, posture } = await scanShell(box.ctx([agent('cursor', 'Cursor')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.filter((f) => f.severity === 'high')).toHaveLength(2)
+  })
+
+  it('falls back to the generic cursor note without CLI config', async () => {
+    box = sandbox()
+    const { findings } = await scanShell(box.ctx([agent('cursor', 'Cursor')]))
+    expect(findings).toHaveLength(1)
+    expect(findings[0]!.severity).toBe('low')
+  })
+
+  it('reads OpenCode permission rules including wildcard objects', async () => {
+    box = sandbox()
+    box.write('home/.config/opencode/opencode.json', JSON.stringify({ permission: { '*': 'allow', edit: 'ask', bash: { '*': 'ask', 'git *': 'allow', 'curl *': 'allow' } } }))
+    const { findings, posture } = await scanShell(box.ctx([agent('opencode', 'OpenCode')]))
+    expect(posture.unprompted).toBe(false)
+    expect(findings.some((f) => f.title.includes('outside the project'))).toBe(true)
+    expect(findings.find((f) => f.title.includes('risky shell'))?.detail).toContain('curl *')
+    expect(findings.some((f) => f.title.includes('without asking') && f.title.includes('shell'))).toBe(false)
+  })
+
+  it('flags OpenCode bash allow as high', async () => {
+    box = sandbox()
+    box.write('home/work/app/opencode.json', JSON.stringify({ permission: { bash: 'allow' } }))
+    const { findings, posture } = await scanShell(box.ctx([agent('opencode', 'OpenCode')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings[0]!.severity).toBe('high')
+  })
+})
+
 describe('scanShell openclaw and factory', () => {
   it('flags an exposed unauthenticated OpenClaw gateway as critical', async () => {
     box = sandbox()

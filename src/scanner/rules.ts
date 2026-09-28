@@ -10,8 +10,10 @@ interface RuleFile {
   scope: 'user' | 'project'
 }
 
-const ZERO_WIDTH = /[​-‏⁠-⁤﻿‪-‮⁦-⁩]/
-const INJECTION = /(ignore (all |any )?(previous|prior|above) instructions|do not (tell|inform|mention|reveal)( this)? to the user|without (asking|telling|informing) the user|hide this from the user|system prompt override|you are now in developer mode)/i
+const ZERO_WIDTH = /[​-‏⁠-⁤﻿‪-‮⁦-⁩]|[\u{E0000}-\u{E007F}]/u
+const INJECTION = /(ignore (all |any )?(previous|prior|above) instructions|do not (tell|inform|mention|reveal)( this)? to the user|without (asking|telling|informing) the user|hide this from the user|system prompt override|you are now in developer mode|(before|after) (every|each) (task|response|command)[^\n]{0,80}(send|post|upload|read))/i
+const CREDENTIAL_PATH = /(~|\$HOME|\/Users\/[^/\s]+|\/home\/[^/\s]+)\/\.(ssh|aws|gnupg|kube|netrc|git-credentials|npmrc|pypirc|config\/gh|docker\/config)|id_(rsa|ed25519|ecdsa)\b|\.aws\/credentials|\.claude\/\.credentials|\.env(\.local|\.production)?\b|credentials\.json/i
+const SENDS_OUT = /\b(post|send|upload|submit|transmit|exfiltrate|forward)\b[^\n]{0,120}(https?:\/\/|webhook|endpoint|server|url)|\bcurl\b[^\n]*(-d|--data|-F|-T|--upload-file|-X ?POST)/i
 const DOWNLOADS = /\b(curl|wget|Invoke-WebRequest|iwr|fetch)\b[^\n]*https?:\/\//i
 const PIPE_TO_SHELL = /\|\s*(sudo\s+)?(ba|z)?sh\b/
 const DANGEROUS = /\b(rm -rf|sudo |chmod \+x|chmod 777|base64 (-d|--decode)|eval\s*\(|nc -e|mkfifo|\/dev\/tcp\/|crontab|launchctl|systemctl enable|ssh-keygen|cat ~\/\.ssh|\.aws\/credentials|~\/\.netrc)/i
@@ -62,6 +64,10 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
     [home, '.claude/commands/**/*.md', 'claude-code', 'user'],
     [home, '.claude/agents/**/*.md', 'claude-code', 'user'],
     [home, '.claude/plugins/*/skills/*/SKILL.md', 'claude-code', 'user'],
+    [home, '.claude/plugins/cache/*/*/*/skills/*/SKILL.md', 'claude-code', 'user'],
+    [home, '.claude/plugins/marketplaces/*/plugins/*/skills/*/SKILL.md', 'claude-code', 'user'],
+    [home, '.agents/skills/*/SKILL.md', 'shared', 'user'],
+    [project, '.agents/skills/*/SKILL.md', 'shared', 'project'],
     [home, '.codex/skills/*/SKILL.md', 'codex', 'user'],
     [home, '.openclaw/skills/*/SKILL.md', 'openclaw', 'user'],
     [home, '.openclaw/workspace/skills/*/SKILL.md', 'openclaw', 'user'],
@@ -104,6 +110,9 @@ function inspect(file: RuleFile, home: string, acc: Inspection): void {
   }
   if (INJECTION.test(text)) {
     acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} contains prompt injection phrasing`, detail: `${short} matched "${text.match(INJECTION)?.[0]}". Instructions that tell the model to hide actions from you or override earlier instructions have no place in a rules file.`, path: file.path, agent: file.agent })
+  }
+  if (CREDENTIAL_PATH.test(text) && SENDS_OUT.test(text)) {
+    acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} reads credentials and sends data to a remote endpoint`, detail: `${short} mentions ${text.match(CREDENTIAL_PATH)?.[0]} and also describes sending data out ("${text.match(SENDS_OUT)?.[0]?.slice(0, 60).trim()}"). Three lines of plain English in a skill are enough to exfiltrate a key. No code needed, so code scanners miss it.`, path: file.path, agent: file.agent })
   }
   if (PIPE_TO_SHELL.test(text) || (DOWNLOADS.test(text) && DANGEROUS.test(text))) {
     acc.findings.push({ category: 'rules', severity: 'high', title: `${kind} pipes downloads into a shell`, detail: `${short} contains a download piped into sh or bash, or a download next to privileged commands. The model will run it when the instruction applies.`, path: file.path, agent: file.agent })

@@ -44,6 +44,7 @@ export const cursor = defineAgent({
     join(home, '.cursor'),
     join(project, '.cursor'),
     join(project, '.cursorrules'),
+    join(project, '.cursor', 'cli.json'),
   ],
   versionCommand: 'cursor',
   processNames: ['Cursor', 'cursor-agent'],

@@ -255,6 +255,78 @@ function openclaw(agent: Agent, ctx: ScanContext, posture: ShellPosture): Findin
   return findings
 }
 
+function cursor(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.cursor', 'cli-config.json'), join(ctx.project, '.cursor', 'cli.json')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const cfg = rec(readJson(path))
+    if (!cfg) continue
+    const short = path.replace(ctx.home, '~')
+    const mode = cfg['approvalMode']
+    if (mode === 'unrestricted') {
+      posture.unprompted = true
+      posture.reasons.push(`Cursor CLI approvalMode is unrestricted in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Cursor CLI runs every command unrestricted', detail: `${short} sets approvalMode to "unrestricted". Shell commands and edits run without approval.`, path, agent: agent.slug })
+    } else if (mode === 'auto-review') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Cursor CLI auto reviews its own commands', detail: `${short} sets approvalMode to "auto-review". The model decides what is safe to run, you are not asked.`, path, agent: agent.slug })
+    }
+    const allow = strArr(rec(cfg['permissions'])?.['allow'])
+    const shellAll = allow.filter((r) => /^Shell(\(\*?\))?$/.test(r.trim()))
+    const risky = allow.filter((r) => /Shell\([^)]*(curl|wget|sudo|rm|chmod|ssh|scp|eval|bash|sh|npm publish|git push)/.test(r))
+    if (shellAll.length > 0) {
+      posture.unprompted = true
+      posture.reasons.push(`Cursor CLI allow list includes ${shellAll[0]} in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Cursor CLI pre approves every shell command', detail: `${short} allow list contains "${shellAll[0]}".`, path, agent: agent.slug })
+    } else if (risky.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: `Cursor CLI pre approves ${risky.length} risky shell pattern${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) {
+    findings.push(generic(agent, 'low', 'Cursor has an integrated terminal and an auto run setting stored in its app state, which snuf cannot read. Check Cursor settings for auto run, and ~/.cursor/cli-config.json for the CLI.'))
+  }
+  return findings
+}
+
+function opencodePermission(value: unknown): 'allow' | 'ask' | 'deny' | undefined {
+  if (value === 'allow' || value === 'ask' || value === 'deny') return value
+  const star = rec(value)?.['*']
+  return star === 'allow' || star === 'ask' || star === 'deny' ? star : undefined
+}
+
+function opencode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [join(ctx.home, '.config', 'opencode', 'opencode.json'), join(ctx.project, 'opencode.json')].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const perm = rec(rec(readJson(path))?.['permission'])
+    if (!perm) continue
+    const short = path.replace(ctx.home, '~')
+    const all = opencodePermission(perm['*'])
+    const bash = opencodePermission(perm['bash']) ?? all
+    const edit = opencodePermission(perm['edit']) ?? all
+    const external = opencodePermission(perm['external_directory']) ?? all
+    if (bash === 'allow') {
+      posture.unprompted = true
+      posture.reasons.push(`OpenCode permission.bash is allow in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'OpenCode runs shell commands without asking', detail: `${short} sets permission.${perm['bash'] !== undefined ? 'bash' : '*'} to "allow". Every command the model chooses runs immediately.`, path, agent: agent.slug })
+    }
+    if (edit === 'allow') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'OpenCode edits files without asking', detail: `${short} sets permission.${perm['edit'] !== undefined ? 'edit' : '*'} to "allow".`, path, agent: agent.slug })
+    }
+    if (external === 'allow') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'OpenCode may work outside the project directory', detail: `${short} sets permission.external_directory to "allow", so reads and writes beyond the repo do not prompt.`, path, agent: agent.slug })
+    }
+    const bashRules = rec(perm['bash'])
+    if (bashRules) {
+      const risky = Object.entries(bashRules).filter(([k, v]) => k !== '*' && v === 'allow' && /curl|wget|sudo|rm|chmod|ssh|scp|eval|npm publish|git push/.test(k)).map(([k]) => k)
+      if (risky.length > 0 && bash !== 'allow') {
+        findings.push({ category: 'shell', severity: 'medium', title: `OpenCode pre approves ${risky.length} risky shell pattern${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+      }
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'info', 'OpenCode asks before shell commands and edits by default. Set permission rules in opencode.json to tighten further.'))
+  return findings
+}
+
 function factory(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [
     join(ctx.home, '.factory', 'settings.json'),
@@ -307,6 +379,11 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         findings.push(...gemini(agent, ctx, posture))
         break
       case 'cursor':
+        findings.push(...cursor(agent, ctx, posture))
+        break
+      case 'opencode':
+        findings.push(...opencode(agent, ctx, posture))
+        break
       case 'windsurf':
       case 'kiro':
       case 'trae':
