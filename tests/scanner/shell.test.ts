@@ -252,3 +252,38 @@ describe('scanShell kiro and claude allow list extras', () => {
     expect(findings.find((f) => f.title.includes('hardened'))?.title).toContain('bypass mode disabled')
   })
 })
+
+describe('scanShell amp, goose, copilot', () => {
+  it('reads Amp dangerouslyAllowAll, permissions and allowlist', async () => {
+    box = sandbox()
+    box.write('home/.config/amp/settings.json', JSON.stringify({ 'amp.permissions': [{ tool: 'Bash', action: 'allow' }], 'amp.commands.allowlist': ['git status', 'curl *'] }))
+    const { findings, posture } = await scanShell(box.ctx([agent('amp', 'Amp')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.map((f) => f.severity).sort()).toEqual(['high', 'medium'])
+  })
+
+  it('treats a missing GOOSE_MODE as auto and smart_approve as low', async () => {
+    box = sandbox()
+    const saved = process.env['GOOSE_MODE']
+    delete process.env['GOOSE_MODE']
+    box.write('home/.config/goose/config.yaml', 'GOOSE_PROVIDER: anthropic\n')
+    const missing = await scanShell(box.ctx([agent('goose', 'Goose')]))
+    expect(missing.findings[0]!.severity).toBe('medium')
+    expect(missing.posture.unprompted).toBe(true)
+    box.write('home/.config/goose/config.yaml', 'GOOSE_MODE: smart_approve\n')
+    const smart = await scanShell(box.ctx([agent('goose', 'Goose')]))
+    expect(smart.findings[0]!.severity).toBe('low')
+    box.write('home/.config/goose/config.yaml', 'GOOSE_MODE: auto\n')
+    const auto = await scanShell(box.ctx([agent('goose', 'Goose')]))
+    expect(auto.findings[0]!.severity).toBe('high')
+    if (saved !== undefined) process.env['GOOSE_MODE'] = saved
+  })
+
+  it('flags Copilot CLI trusted_folders that include home', async () => {
+    box = sandbox()
+    box.write('home/.copilot/config.json', JSON.stringify({ trusted_folders: [box.project, box.home] }))
+    const { findings } = await scanShell(box.ctx([agent('copilot', 'GitHub Copilot')]))
+    expect(findings[0]!.severity).toBe('high')
+    expect(findings[0]!.detail).not.toContain(box.project + ',')
+  })
+})

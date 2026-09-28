@@ -480,6 +480,73 @@ function kiro(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] 
   return findings
 }
 
+function isHomeOrAncestor(dir: string, home: string): boolean {
+  const d = dir.replace(/^~/, home).replace(/[\\/]+$/, '')
+  const h = home.replace(/[\\/]+$/, '')
+  return d === h || h.startsWith(d + '/') || d === '/'
+}
+
+function amp(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const path = join(ctx.home, '.config', 'amp', 'settings.json')
+  const settings = rec(readJson(path))
+  const findings: Finding[] = []
+  if (settings) {
+    const short = path.replace(ctx.home, '~')
+    if (settings['amp.dangerouslyAllowAll'] === true) {
+      posture.unprompted = true
+      posture.reasons.push('Amp dangerouslyAllowAll is on')
+      findings.push({ category: 'shell', severity: 'high', title: 'Amp runs every command without asking', detail: `${short} sets amp.dangerouslyAllowAll to true. The name says it.`, path, agent: agent.slug })
+    }
+    const perms = Array.isArray(settings['amp.permissions']) ? (settings['amp.permissions'] as unknown[]) : []
+    const bashAll = perms.filter((p) => {
+      const r = rec(p)
+      const cmds = strArr(rec(r?.['matches'])?.['cmd'])
+      return r?.['tool'] === 'Bash' && r['action'] === 'allow' && (cmds.length === 0 || cmds.includes('*'))
+    })
+    if (bashAll.length > 0 && settings['amp.dangerouslyAllowAll'] !== true) {
+      posture.unprompted = true
+      posture.reasons.push('Amp permissions allow every Bash command')
+      findings.push({ category: 'shell', severity: 'high', title: 'Amp pre approves every shell command', detail: `${short} has an amp.permissions rule that allows Bash with no command pattern.`, path, agent: agent.slug })
+    }
+    const allowlist = strArr(settings['amp.commands.allowlist'])
+    const risky = allowlist.filter((c) => /curl|wget|sudo|rm |chmod|ssh|scp|eval|npm publish|git push|^\*$/.test(c))
+    if (risky.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: `Amp pre approves ${risky.length} risky command${risky.length > 1 ? 's' : ''}`, detail: `${short} amp.commands.allowlist: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Amp asks before commands that are not on amp.commands.allowlist. Review that list in ~/.config/amp/settings.json.'))
+  return findings
+}
+
+function goose(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const path = join(ctx.home, '.config', 'goose', 'config.yaml')
+  const text = readText(path)
+  const short = path.replace(ctx.home, '~')
+  const mode = text?.match(/^\s*GOOSE_MODE:\s*["']?([\w]+)/m)?.[1] ?? process.env['GOOSE_MODE']
+  if (mode === 'auto' || (text !== undefined && mode === undefined)) {
+    posture.unprompted = true
+    posture.reasons.push(mode === 'auto' ? 'Goose GOOSE_MODE is auto' : 'Goose GOOSE_MODE is unset, which defaults to auto')
+    return [{ category: 'shell', severity: mode === 'auto' ? 'high' : 'medium', title: mode === 'auto' ? 'Goose auto approves every tool call' : 'Goose has no GOOSE_MODE set, so it auto approves', detail: `${short} ${mode === 'auto' ? 'sets GOOSE_MODE: auto' : 'does not set GOOSE_MODE, and the built in default is auto (goose issue #12448)'}. Shell commands and file writes run without a prompt. Set GOOSE_MODE: smart_approve or approve.`, path, agent: agent.slug }]
+  }
+  if (mode === 'smart_approve') {
+    return [{ category: 'shell', severity: 'low', title: 'Goose lets a model decide which tool calls need approval', detail: `${short} sets GOOSE_MODE: smart_approve. Read only looking calls are auto approved based on tool annotations and an LLM judge.`, path, agent: agent.slug }]
+  }
+  if (mode === 'approve' || mode === 'chat') {
+    return [{ category: 'shell', severity: 'info', title: `Goose runs in ${mode} mode`, detail: `${short} sets GOOSE_MODE: ${mode}.`, path, agent: agent.slug }]
+  }
+  return [generic(agent, 'low', 'Goose config not found. Its default permission mode is auto, which approves every tool call.')]
+}
+
+function copilot(agent: Agent, ctx: ScanContext): Finding[] {
+  const path = join(ctx.home, '.copilot', 'config.json')
+  const cfg = rec(readJson(path))
+  const trusted = strArr(cfg?.['trusted_folders']).filter((d) => isHomeOrAncestor(d, ctx.home))
+  if (trusted.length > 0) {
+    return [{ category: 'shell', severity: 'high', title: 'Copilot CLI trusts your home directory', detail: `${path.replace(ctx.home, '~')} lists ${trusted.join(', ')} under trusted_folders. Every session under it can read, write and execute without the folder trust prompt.`, path, agent: agent.slug }]
+  }
+  return [generic(agent, 'low', 'Copilot CLI asks per tool unless started with --allow-tool or --allow-all-tools. Trusted folders live in ~/.copilot/config.json.')]
+}
+
 function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -624,6 +691,15 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         break
       case 'kiro':
         findings.push(...kiro(agent, ctx, posture))
+        break
+      case 'amp':
+        findings.push(...amp(agent, ctx, posture))
+        break
+      case 'goose':
+        findings.push(...goose(agent, ctx, posture))
+        break
+      case 'copilot':
+        findings.push(...copilot(agent, ctx))
         break
       case 'windsurf':
       case 'trae':
