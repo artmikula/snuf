@@ -397,3 +397,37 @@ describe('scanShell continue, vibe, qwen', () => {
     expect(findings.map((f) => f.severity)).toEqual(['high', 'high'])
   })
 })
+
+describe('scanShell junie', () => {
+  it('reads brave mode, byok keys, and allowlist rules', async () => {
+    box = sandbox()
+    box.write('home/.junie/config.json', JSON.stringify({ brave: true, byok: { openai: 'sk-' + 'j'.repeat(40) }, hooks: [{ on: 'start', run: 'echo hi' }] }))
+    box.write('home/.junie/allowlist.json', JSON.stringify({ defaultBehavior: 'ask', rules: { executables: { rules: [{ prefix: 'git', action: 'allow' }, { prefix: 'curl', action: 'allow' }] }, readSecretFile: { rules: [{ pattern: '**/.env', action: 'allow' }] }, readOutsideProject: { rules: [{ pattern: '/**', action: 'allow' }] } } }))
+    const { findings, posture } = await scanShell(box.ctx([agent('junie', 'JetBrains Junie')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.find((f) => f.title.includes('brave mode'))?.severity).toBe('high')
+    expect(findings.find((f) => f.category === 'secret')?.severity).toBe('critical')
+    expect(JSON.stringify(findings)).not.toContain('jjjjjjjjjj')
+    expect(findings.find((f) => f.title.includes('risky command'))?.detail).toContain('curl')
+    expect(findings.find((f) => f.title.includes('secret files'))?.severity).toBe('high')
+    expect(findings.some((f) => f.title.includes('anywhere outside'))).toBe(true)
+  })
+
+  it('flags a blanket executables rule', async () => {
+    box = sandbox()
+    box.write('home/.junie/allowlist.json', JSON.stringify({ rules: { executables: { rules: [{ prefix: '', action: 'allow' }] } } }))
+    const { findings } = await scanShell(box.ctx([agent('junie', 'JetBrains Junie')]))
+    expect(findings[0]!.severity).toBe('high')
+  })
+})
+
+describe('scanShell cursor hooks', () => {
+  it('rates project hooks medium and user hooks low', async () => {
+    box = sandbox()
+    box.write('home/work/app/.cursor/hooks.json', JSON.stringify({ version: 1, hooks: { beforeShellExecution: [{ command: './hooks/log.sh' }], afterFileEdit: [{ command: 'prettier' }] } }))
+    box.write('home/.cursor/hooks.json', JSON.stringify({ version: 1, hooks: { stop: [{ command: 'say done' }] } }))
+    const { findings } = await scanShell(box.ctx([agent('cursor', 'Cursor')]))
+    expect(findings.find((f) => f.title.includes('2 Cursor hooks'))?.severity).toBe('medium')
+    expect(findings.find((f) => f.title.includes('1 Cursor hook '))?.severity).toBe('low')
+  })
+})

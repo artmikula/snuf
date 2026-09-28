@@ -132,8 +132,11 @@ export const cline = defineAgent({
   slug: 'cline',
   paths: (home, project) => [
     join(vscodeGlobalStorage(home), 'saoudrizwan.claude-dev'),
+    join(home, '.cline'),
     join(project, '.clinerules'),
   ],
+  versionCommand: 'cline',
+  processNames: ['cline'],
 })
 
 export const rooCode = defineAgent({
@@ -204,6 +207,8 @@ export const junie = defineAgent({
   name: 'JetBrains Junie',
   slug: 'junie',
   paths: (home, project) => [join(home, '.junie'), join(project, '.junie')],
+  versionCommand: 'junie',
+  processNames: ['junie'],
 })
 
 export const factory = defineAgent({

@@ -412,6 +412,15 @@ function cursor(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[
       findings.push({ category: 'shell', severity: 'medium', title: `Cursor CLI pre approves ${risky.length} risky shell pattern${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
     }
   }
+  for (const path of [join(ctx.home, '.cursor', 'hooks.json'), join(ctx.project, '.cursor', 'hooks.json')]) {
+    const hooks = rec(rec(readJson(path))?.['hooks'])
+    if (!hooks) continue
+    let count = 0
+    for (const list of Object.values(hooks)) if (Array.isArray(list)) count += list.filter((h) => typeof rec(h)?.['command'] === 'string').length
+    if (count === 0) continue
+    const projectScoped = path.startsWith(ctx.project)
+    findings.push({ category: 'shell', severity: projectScoped ? 'medium' : 'low', title: `${count} Cursor hook${count > 1 ? 's' : ''} run${count > 1 ? '' : 's'} shell commands automatically`, detail: `${path.replace(ctx.home, '~')} defines hooks on ${Object.keys(hooks).join(', ')}. They execute without a prompt.${projectScoped ? ' Project scoped hooks run for anyone who opens the repo in Cursor.' : ''}`, path, agent: agent.slug })
+  }
   if (findings.length === 0) {
     findings.push(generic(agent, 'low', 'Cursor has an integrated terminal and an auto run setting stored in its app state, which snuf cannot read. Check Cursor settings for auto run, and ~/.cursor/cli-config.json for the CLI.'))
   }
@@ -798,6 +807,71 @@ function qwen(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] 
   return findings
 }
 
+function junieRules(section: unknown): Array<{ prefix?: string; pattern?: string; action: string }> {
+  const list = rec(section)?.['rules']
+  if (!Array.isArray(list)) return []
+  return list.map((r) => rec(r)).filter((r): r is Record<string, unknown> => r !== undefined).map((r) => ({
+    prefix: typeof r['prefix'] === 'string' ? (r['prefix'] as string) : undefined,
+    pattern: typeof r['pattern'] === 'string' ? (r['pattern'] as string) : undefined,
+    action: typeof r['action'] === 'string' ? (r['action'] as string) : 'ask',
+  }))
+}
+
+function junie(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const findings: Finding[] = []
+  for (const path of [join(ctx.home, '.junie', 'config.json'), join(ctx.project, '.junie', 'config.json')]) {
+    const cfg = rec(readJson(path))
+    if (!cfg) continue
+    const short = path.replace(ctx.home, '~')
+    const brave = cfg['brave']
+    if (brave === true || brave === 'on') {
+      posture.unprompted = true
+      posture.reasons.push(`Junie brave mode is on in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Junie runs in brave mode', detail: `${short} sets brave to ${JSON.stringify(brave)}. Terminal commands, MCP tools and edits outside the project run without asking.`, path, agent: agent.slug })
+    } else if (brave === 'auto') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Junie auto approves commands it considers safe', detail: `${short} sets brave to "auto".`, path, agent: agent.slug })
+    }
+    const byok = rec(cfg['byok'])
+    const keyed = Object.entries(byok ?? {}).filter(([, v]) => typeof v === 'string' && (v as string).length >= 16 && !(v as string).startsWith('$'))
+    if (keyed.length > 0) {
+      findings.push({ category: 'secret', severity: 'critical', title: `${keyed.length} API key${keyed.length > 1 ? 's' : ''} stored in plaintext in Junie config`, detail: `${short} byok holds ${keyed.map(([k]) => k).join(', ')} inline. Reference an environment variable instead.`, path, agent: agent.slug })
+    }
+    if (Array.isArray(cfg['hooks']) && (cfg['hooks'] as unknown[]).length > 0) {
+      findings.push({ category: 'shell', severity: path.startsWith(ctx.project) ? 'medium' : 'low', title: 'Junie hooks run shell commands automatically', detail: `${short} defines ${(cfg['hooks'] as unknown[]).length} session hook${(cfg['hooks'] as unknown[]).length > 1 ? 's' : ''}.${path.startsWith(ctx.project) ? ' Project scoped, so they run for anyone who clones the repo.' : ''}`, path, agent: agent.slug })
+    }
+  }
+  const allowPath = join(ctx.home, '.junie', 'allowlist.json')
+  const allowlist = rec(readJson(allowPath))
+  if (allowlist) {
+    const short = allowPath.replace(ctx.home, '~')
+    const rules = rec(allowlist['rules'])
+    if (allowlist['defaultBehavior'] === 'allow') {
+      posture.unprompted = true
+      posture.reasons.push('Junie allowlist defaultBehavior is allow')
+      findings.push({ category: 'shell', severity: 'high', title: 'Junie allows every action by default', detail: `${short} sets defaultBehavior to "allow". The allowlist becomes a denylist with nothing in it.`, path: allowPath, agent: agent.slug })
+    }
+    const exec = junieRules(rules?.['executables']).filter((r) => r.action === 'allow')
+    const blanket = exec.filter((r) => r.prefix === '' || r.pattern === '*' || r.pattern === '**' || /^(bash|sh|zsh)$/.test(r.prefix ?? ''))
+    if (blanket.length > 0 && allowlist['defaultBehavior'] !== 'allow') {
+      posture.unprompted = true
+      posture.reasons.push('Junie allowlist allows every executable')
+      findings.push({ category: 'shell', severity: 'high', title: 'Junie pre approves every terminal command', detail: `${short} has an executables rule with ${blanket[0]!.prefix !== undefined ? `prefix "${blanket[0]!.prefix}"` : `pattern "${blanket[0]!.pattern}"`}.`, path: allowPath, agent: agent.slug })
+    } else {
+      const risky = exec.map((r) => r.prefix ?? r.pattern ?? '').filter((p) => /^(curl|wget|sudo|rm|chmod|ssh|scp|eval|npm publish|git push)/.test(p))
+      if (risky.length > 0) findings.push({ category: 'shell', severity: 'medium', title: `Junie pre approves ${risky.length} risky command${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path: allowPath, agent: agent.slug })
+    }
+    if (junieRules(rules?.['readSecretFile']).some((r) => r.action === 'allow')) {
+      findings.push({ category: 'shell', severity: 'high', title: 'Junie may read secret files without asking', detail: `${short} has an allow rule under readSecretFile. Junie's own classifier flagged those paths as likely credentials.`, path: allowPath, agent: agent.slug })
+    }
+    const outside = junieRules(rules?.['readOutsideProject']).filter((r) => r.action === 'allow' && /^(\/|~|\$HOME)?\*\*?$|^\/\*\*$|^~\/\*\*$/.test(r.pattern ?? r.prefix ?? ''))
+    if (outside.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Junie reads anywhere outside the project without asking', detail: `${short} allows readOutsideProject for ${outside[0]!.pattern ?? outside[0]!.prefix}.`, path: allowPath, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Junie asks before terminal commands, MCP tools and reads outside the project unless brave mode is on. Approvals you accept persist in ~/.junie/allowlist.json.'))
+  return findings
+}
+
 function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -976,6 +1050,9 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
         break
       case 'qwen-code':
         findings.push(...qwen(agent, ctx, posture))
+        break
+      case 'junie':
+        findings.push(...junie(agent, ctx, posture))
         break
       case 'amazon-q':
         findings.push(generic(agent, 'low', 'Amazon Q Developer CLI was folded into Kiro CLI in 2026 and its config was copied to ~/.kiro. If ~/.aws/amazonq is still here, its MCP servers and custom agents may be duplicated in Kiro; review both.'))
