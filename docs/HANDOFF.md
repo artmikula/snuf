@@ -43,6 +43,20 @@ Two things changed in reporting: the markdown report footer points to the audit 
 - Agent version lookup runs `<cmd> --version` with a 3 second timeout. `claude --version` occasionally does an update check and exceeds that on first call. Result is a blank version, not an error.
 - Constraints that must not be broken: zero network calls, read only (the only write is `--output`), four runtime deps, no secret values in any output, sub second runtime.
 
+## Added after the first handoff (same day, later)
+
+- MCP `autoApprove` / `alwaysAllow` lists (Cline, Roo Code) and disabled servers skipped.
+- Gemini `~/.gemini/trustedFolders.json` (flat map or `config` map of path to TRUST_FOLDER / TRUST_PARENT / DO_NOT_TRUST).
+- Claude Code: sandbox settings (`sandbox.enabled`, `allowUnsandboxedCommands`, `excludedCommands`, `network.allowedDomains`, `credentials.allowPlaintextInject`, `enableWeakerNestedSandbox`), bypass mode downgraded to medium when the sandbox is on, whole server `mcp__x` / `mcp__x__*` allows, `WebFetch(domain:*)`, hardening info for `disableBypassPermissionsMode`, `disableAutoMode`, `blockReadsOutsideWorkingDirectories`.
+- Codex `approvals_reviewer = "auto_review"`.
+- Grok Build `[ui] permission_mode`, `[sandbox] auto_allow_bash` and `profile`, `[permission] allow`, `default_selected_permission`.
+- Kiro `~/.kiro/settings/permissions.yaml`, workspace root permissions, `~/.kiro/agents/*.json` `allowedTools`.
+- Amp `amp.dangerouslyAllowAll`, `amp.permissions`, `amp.commands.allowlist`.
+- Goose `GOOSE_MODE` (auto is high, unset is medium because the enum default is auto, smart_approve is low).
+- Copilot CLI `trusted_folders` containing home.
+- End to end test in `tests/e2e.test.ts` that runs the orchestrator against a fake HOME and checks no secret value reaches any output format.
+- `npm publish` was attempted by the agent and blocked by the Claude Code permission classifier ("Create Public Surface"). Art has to run `npm publish --access public` himself.
+
 ## Known rough edges
 
 - Grok Build permission keys are not verified. docs.x.ai/build/settings/reference has the TOML key list. The GitSpawn version table marks it unpatched as of Sept 1.
