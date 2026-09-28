@@ -35,6 +35,26 @@ function isAncestorOrSelf(dir: string, target: string): boolean {
   return t === d || t.startsWith(d + '/') || t.startsWith(d + '\\')
 }
 
+function coworkFindings(ctx: ScanContext): Finding[] {
+  if (!ctx.agents.some((a) => a.slug === 'claude-desktop')) return []
+  const base = process.platform === 'darwin' ? join(ctx.home, 'Library', 'Application Support') : process.platform === 'win32' ? (process.env['APPDATA'] ?? join(ctx.home, 'AppData', 'Roaming')) : join(ctx.home, '.config')
+  const path = join(base, 'Claude', 'claude_desktop_config.json')
+  const cfg = readJson(path) as Record<string, unknown> | undefined
+  const prefs = cfg?.['preferences'] as Record<string, unknown> | undefined
+  const grants = prefs?.['remoteSessionFolderGrants'] as Record<string, unknown> | undefined
+  const folders = new Set<string>()
+  for (const list of Object.values(grants ?? {})) {
+    if (Array.isArray(list)) for (const f of list) if (typeof f === 'string') folders.add(f)
+  }
+  if (typeof cfg?.['coworkUserFilesPath'] === 'string') folders.add(cfg['coworkUserFilesPath'] as string)
+  if (folders.size === 0) return []
+  const wide = [...folders].filter((f) => isAncestorOrSelf(f, ctx.home))
+  if (wide.length > 0) {
+    return [{ category: 'file-access', severity: 'high', title: 'Cowork has been granted your home directory', detail: `${path.replace(ctx.home, '~')} records a Cowork session with access to ${wide.join(', ')}. Cowork mounts granted folders into its container, so everything under it, credentials included, was readable and writable by that session.`, path, agent: 'claude-desktop' }]
+  }
+  return [{ category: 'file-access', severity: 'info', title: `Cowork has been granted ${folders.size} folder${folders.size > 1 ? 's' : ''}`, detail: `${[...folders].slice(0, 5).join(', ')}${folders.size > 5 ? ` and ${folders.size - 5} more` : ''}. Grants persist per session in ${path.replace(ctx.home, '~')}.`, path, agent: 'claude-desktop' }]
+}
+
 export async function scanPermissions(ctx: ScanContext, posture: ShellPosture, unknownStdioServers: number): Promise<Finding[]> {
   if (ctx.agents.length === 0) return []
   const findings: Finding[] = []
@@ -84,6 +104,8 @@ export async function scanPermissions(ctx: ScanContext, posture: ShellPosture, u
       path: t.path,
     })
   }
+
+  findings.push(...coworkFindings(ctx))
 
   if (ctx.project === home.replace(/[\\/]+$/, '')) {
     findings.push({ category: 'file-access', severity: 'high', title: 'Scan directory is your home directory', detail: 'An agent started here treats your entire home directory as the project. Start agents inside a repo instead.', path: ctx.project })

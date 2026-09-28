@@ -39,3 +39,14 @@ describe('scanPermissions', () => {
     expect(findings.some((f) => f.title.includes('home directory as the project'))).toBe(false)
   })
 })
+
+describe('cowork folder grants', () => {
+  it('flags a Cowork grant on the home directory', async () => {
+    const { scanPermissions } = await import('../../src/scanner/permissions.js')
+    box = sandbox()
+    const rel = process.platform === 'darwin' ? 'home/Library/Application Support/Claude/claude_desktop_config.json' : 'home/.config/Claude/claude_desktop_config.json'
+    box.write(rel, JSON.stringify({ preferences: { remoteSessionFolderGrants: { s1: [box.project], s2: [box.home] } } }))
+    const findings = await scanPermissions(box.ctx([agent('claude-desktop')]), { unprompted: false, reasons: [] }, 0)
+    expect(findings.find((f) => f.title.includes('Cowork'))?.severity).toBe('high')
+  })
+})

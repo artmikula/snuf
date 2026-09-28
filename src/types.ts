@@ -2,7 +2,7 @@ export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical'
 
 export const SEVERITIES: Severity[] = ['info', 'low', 'medium', 'high', 'critical']
 
-export type OutputFormat = 'terminal' | 'json' | 'markdown'
+export type OutputFormat = 'terminal' | 'json' | 'markdown' | 'sarif'
 
 export interface Agent {
   name: string

@@ -78,3 +78,15 @@ describe('scanSecrets git tracked files', () => {
     expect(findings.some((f) => f.title.includes('1 credential in'))).toBe(true)
   })
 })
+
+describe('claude desktop token cache', () => {
+  it('flags oauth token cache keys in config.json', async () => {
+    box = sandbox()
+    const rel = process.platform === 'darwin' ? 'home/Library/Application Support/Claude/config.json' : 'home/.config/Claude/config.json'
+    box.write(rel, JSON.stringify({ locale: 'en', 'oauth:tokenCache': 'djEw' + 'x'.repeat(60), 'oauth:tokenCacheV2': 'djEw' + 'y'.repeat(60) }))
+    const findings = await scanSecrets(box.ctx([agent('claude-desktop')]), [])
+    const hit = findings.find((f) => f.title.includes('Claude Desktop OAuth'))
+    expect(hit?.severity).toBe('high')
+    expect(JSON.stringify(findings)).not.toContain('xxxxxxxxxx')
+  })
+})

@@ -41,3 +41,21 @@ describe('reporters', () => {
     expect(renderTerminal(result, {}, '/home/u')).toContain('Do this first')
   })
 })
+
+describe('renderSarif', () => {
+  it('produces valid SARIF 2.1 structure with rules and locations', async () => {
+    const { renderSarif } = await import('../../src/reporter/sarif.js')
+    const withPath: ScanResult = { ...result, findings: [...result.findings, { category: 'git', severity: 'high', title: 'Repo config runs a command', detail: 'd', path: '/home/u/app/.git/config' }] }
+    const sarif = JSON.parse(renderSarif(withPath, {}))
+    expect(sarif.version).toBe('2.1.0')
+    const run = sarif.runs[0]
+    expect(run.tool.driver.name).toBe('snuf')
+    expect(run.results.length).toBe(withPath.findings.length)
+    expect(run.tool.driver.rules.length).toBeGreaterThan(0)
+    const located = run.results.find((r: { locations?: unknown[] }) => r.locations)
+    expect(located.locations[0].physicalLocation.artifactLocation.uri).toMatch(/^file:\/\//)
+    expect(JSON.stringify(sarif)).not.toContain('abcdefghijklmnopqrstuvwxyz')
+    const high = JSON.parse(renderSarif(withPath, { severity: 'high' }))
+    expect(high.runs[0].results.every((r: { level: string }) => r.level === 'error')).toBe(true)
+  })
+})

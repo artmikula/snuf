@@ -318,6 +318,7 @@ export function mcpConfigSources(home: string, project: string): ConfigSource[] 
     { path: join(home, '.junie', 'mcp', 'mcp.json'), agent: 'junie', label: '~/.junie/mcp/mcp.json', parse: mcpServers },
     { path: join(project, '.junie', 'mcp', 'mcp.json'), agent: 'junie', label: 'project .junie/mcp/mcp.json', parse: mcpServers },
     { path: join(appSupport(home), 'Trae', 'mcp.json'), agent: 'trae', label: 'Trae', parse: mcpServers },
+    { path: join(home, '.trae', 'mcp.json'), agent: 'trae', label: '~/.trae/mcp.json', parse: mcpServers },
     { path: join(project, '.trae', 'mcp.json'), agent: 'trae', label: 'project .trae/mcp.json', parse: mcpServers },
     { path: join(home, '.factory', 'mcp.json'), agent: 'factory', label: '~/.factory/mcp.json', parse: mcpServers },
     { path: join(project, '.factory', 'mcp.json'), agent: 'factory', label: 'project .factory/mcp.json', parse: mcpServers },

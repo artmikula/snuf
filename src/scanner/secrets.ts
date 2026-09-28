@@ -157,8 +157,32 @@ function credentialStoreFindings(home: string, agents: ScanContext['agents']): F
   return findings
 }
 
+function appSupportDir(home: string): string {
+  if (process.platform === 'darwin') return join(home, 'Library', 'Application Support')
+  if (process.platform === 'win32') return process.env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
+  return join(home, '.config')
+}
+
+function claudeDesktopFindings(home: string, agents: ScanContext['agents']): Finding[] {
+  if (agents.length > 0 && !agents.some((a) => a.slug === 'claude-desktop')) return []
+  const path = join(appSupportDir(home), 'Claude', 'config.json')
+  const json = readJson(path)
+  if (!json || typeof json !== 'object') return []
+  const keys = Object.keys(json as Record<string, unknown>).filter((k) => /^oauth:tokenCache/i.test(k) && typeof (json as Record<string, unknown>)[k] === 'string')
+  if (keys.length === 0) return []
+  return [{
+    category: 'secret',
+    severity: 'high',
+    title: 'Claude Desktop OAuth token cache stored in plaintext',
+    detail: `${path.replace(home, '~')} holds ${keys.join(' and ')}. That is the session token for your Claude account, readable by every process running as you, including every MCP server Claude Desktop starts.`,
+    path,
+    agent: 'claude-desktop',
+  }]
+}
+
 export async function scanSecrets(ctx: ScanContext, servers: McpServer[]): Promise<Finding[]> {
   return [
+    ...claudeDesktopFindings(ctx.home, ctx.agents),
     ...mcpSecretFindings(servers, ctx.project),
     ...environmentFindings(ctx.agents),
     ...envFileFindings(ctx.home, ctx.project),
