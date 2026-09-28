@@ -21,6 +21,11 @@ function credentialStores(home: string): CredentialStore[] {
     { path: join(local, 'opencode', 'auth.json'), agent: 'opencode', label: 'OpenCode auth tokens' },
     { path: join(home, '.openclaw', 'credentials'), agent: 'openclaw', label: 'OpenClaw credential store' },
     { path: join(home, '.qwen', 'oauth_creds.json'), agent: 'qwen-code', label: 'Qwen Code OAuth credentials' },
+    { path: join(home, '.copilot', 'config.json'), agent: 'copilot', label: 'Copilot CLI token fallback' },
+    { path: join(home, '.hermes', '.env'), agent: 'hermes', label: 'Hermes Agent secrets file' },
+    { path: join(home, '.factory', 'config.json'), agent: 'factory', label: 'Factory Droid BYOK keys' },
+    { path: join(home, '.kimi-code', 'auth.json'), agent: 'kimi-code', label: 'Kimi Code auth tokens' },
+    { path: join(home, '.grok', 'auth.json'), agent: 'grok', label: 'Grok Build auth tokens' },
   ]
 }
 
@@ -31,6 +36,8 @@ function stateFiles(home: string): CredentialStore[] {
     { path: join(home, '.config', 'amp', 'settings.json'), agent: 'amp', label: 'Amp settings' },
     { path: join(home, '.continue', 'config.json'), agent: 'continue', label: 'Continue config' },
     { path: join(home, '.config', 'zed', 'settings.json'), agent: 'zed', label: 'Zed settings' },
+    { path: join(home, '.factory', 'settings.json'), agent: 'factory', label: 'Factory Droid settings' },
+    { path: join(home, '.pi', 'agent', 'settings.json'), agent: 'pi', label: 'Pi settings' },
   ]
 }
 

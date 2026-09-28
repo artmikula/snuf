@@ -21,7 +21,7 @@ describe('scanMcpServers', () => {
     expect(servers).toHaveLength(1)
     expect(servers[0]!.agent).toBe('claude-desktop')
     expect(servers[0]!.isKnown).toBe(true)
-    expect(findings).toEqual([])
+    expect(findings.filter((f) => f.severity !== 'info')).toEqual([])
   })
 
   it('reads project scoped servers nested under projects in ~/.claude.json', async () => {
@@ -142,5 +142,69 @@ args = ["server.py"]
     box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { r: { url: 'http://mcp.example.com/sse' } } }))
     const { findings } = await scanMcpServers(box.ctx())
     expect(findings[0]!.title).toContain('plain HTTP')
+  })
+})
+
+describe('scanMcpServers supply chain', () => {
+  it('flags lookalike package names as typosquats', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: {
+      fs: { command: 'npx', args: ['-y', 'mcp-remoto@1.0.0'] },
+      ok: { command: 'npx', args: ['-y', 'mcp-remote@1.0.0'] },
+    } }))
+    const { findings } = await scanMcpServers(box.ctx())
+    const squat = findings.filter((f) => f.title.includes('typosquat'))
+    expect(squat).toHaveLength(1)
+    expect(squat[0]!.title).toContain('fs')
+    expect(squat[0]!.severity).toBe('high')
+  })
+
+  it('flags lookalike scopes', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { x: { command: 'npx', args: ['-y', '@modelcontextprotocal/server-thing@2.0.0'] } } }))
+    const { findings } = await scanMcpServers(box.ctx())
+    expect(findings.some((f) => f.title.includes('typosquat'))).toBe(true)
+  })
+
+  it('aggregates unpinned npx and uvx servers', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: {
+      a: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] },
+      b: { command: 'npx', args: ['-y', 'some-mcp@latest'] },
+      c: { command: 'uvx', args: ['mcp-server-git@1.2.3'] },
+      d: { command: 'node', args: ['server.js'] },
+    } }))
+    const { findings } = await scanMcpServers(box.ctx())
+    const unpinned = findings.find((f) => f.title.includes('latest at launch'))
+    expect(unpinned?.title).toContain('2 MCP servers')
+    expect(unpinned?.severity).toBe('medium')
+    expect(unpinned?.detail).toMatch(/^a, b are/)
+  })
+
+  it('flags servers installed from git', async () => {
+    box = sandbox()
+    box.write('home/.cursor/mcp.json', JSON.stringify({ mcpServers: { g: { command: 'uvx', args: ['--from', 'git+https://github.com/someone/thing.git', 'thing'] } } }))
+    const { findings } = await scanMcpServers(box.ctx())
+    expect(findings.find((f) => f.title.includes('git repository'))?.severity).toBe('medium')
+  })
+
+  it('parses Hermes config.yaml mcp_servers', async () => {
+    box = sandbox()
+    box.write('home/.hermes/config.yaml', `model: x
+mcp_servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/u"]
+    env:
+      NODE_ENV: production
+  remote:
+    url: https://example.com/mcp
+tools:
+  web: true
+`)
+    const { servers } = await scanMcpServers(box.ctx())
+    expect(servers.map((s) => s.name).sort()).toEqual(['filesystem', 'remote'])
+    expect(servers.find((s) => s.name === 'filesystem')!.isKnown).toBe(true)
+    expect(servers.find((s) => s.name === 'remote')!.transport).toBe('http')
   })
 })

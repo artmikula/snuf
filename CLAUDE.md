@@ -27,6 +27,8 @@ snuf/
 │   │   ├── agents.ts          # Detect installed AI agents
 │   │   ├── mcp.ts             # Scan MCP server configs
 │   │   ├── rules.ts           # Scan rules files, skills, slash commands
+│   │   ├── git.ts             # .git/config attack surface (GitSpawn), agent patch levels
+│   │   ├── ci.ts              # Agent actions in .github/workflows
 │   │   ├── permissions.ts     # Analyze file/dir access scope
 │   │   ├── secrets.ts         # Find exposed API keys & tokens
 │   │   ├── secret-patterns.ts # Shared name and value classifier, masking
@@ -92,6 +94,14 @@ Scan known paths per OS (macOS, Linux, Windows) for:
 | OpenClaw | `~/.openclaw/`, OpenClaw config dirs |
 | OpenCode | `~/.opencode/`, `.opencode/` |
 | Gemini CLI | `~/.gemini/`, `GEMINI.md` |
+| Factory Droid | `~/.factory/`, `.factory/` |
+| Pi | `~/.pi/agent/`, `.pi/` |
+| Kimi Code | `~/.kimi-code/`, `.kimi-code/` |
+| Hermes Agent | `~/.hermes/` (config.yaml, .env) |
+| Grok Build | `~/.grok/` (config.toml) |
+| Antigravity | `~/.gemini/antigravity/` |
+| Amazon Q | `~/.aws/amazonq/`, `.amazonq/` |
+| Mistral Vibe | `~/.vibe/` |
 
 For each agent found, report: version (if detectable), config file paths, and whether it's currently running (check process list).
 
@@ -138,7 +148,16 @@ Scan agent configs and environment for:
 - `.env` files in directories agents can access
 - SSH keys, AWS credentials in default locations
 
-### 6. Shell access
+### 6. Git config (GitSpawn, Sept 2026)
+A repo's own `.git/config` can name a program in `core.fsmonitor`; agents run it via background `git status`. Scan the project `.git/config` for fsmonitor and every other key that names a program (hooksPath, sshCommand, `!` aliases, filters, diff/merge drivers, includes). Flag agents below patched versions (Claude Code 2.1.196, Codex 0.131.0, Goose 1.44.0) and those unpatched at publication (Hermes, Qwen Code, Grok Build).
+
+### 7. CI workflows
+Parse `.github/workflows/*.yml` for agent actions (claude-code-action, codex-action, run-gemini-cli, etc). Flag `allowed_non_write_users: "*"`, untrusted triggers (issues, issue_comment, pull_request_target) combined with write permissions or secrets, and floating refs instead of commit SHAs.
+
+### 8. MCP supply chain
+Typosquat detection (edit distance 2 against well known packages and trusted scopes), git URL installs, and unpinned `npx`/`uvx` packages. Commands inside vendor app bundles (ChatGPT.app, Cursor.app) count as trusted.
+
+### 9. Shell access
 For each agent, determine:
 - Can it execute shell commands? (most can)
 - Is it sandboxed in any way?
@@ -159,6 +178,12 @@ Scoring rules:
 - Skill with unrestricted shell commands → `high`
 - Agent running as root/admin → `critical`
 - No permission model (auto-approve all) → `high`
+- Repo `.git/config` sets `core.fsmonitor` to a command → `critical`
+- Repo `.git/config` names any other program → `high`
+- Agent below GitSpawn patch level → `high`
+- MCP package name is a lookalike of a known package → `high`
+- CI workflow lets any GitHub account prompt an agent → `high`
+- OpenClaw gateway on the network with no auth → `critical`
 
 Overall score: 0-100 (lower is safer). Findings combine multiplicatively (each finding removes a fraction of the remaining safety) so the score never saturates on a single critical.
 - 0-20: Clean — minimal exposure

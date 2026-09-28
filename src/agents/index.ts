@@ -27,7 +27,7 @@ export const claudeCode = defineAgent({
 })
 
 export const claudeDesktop = defineAgent({
-  name: 'Claude Desktop',
+  name: 'Claude Desktop / Cowork',
   slug: 'claude-desktop',
   paths: (home) => [
     join(appSupport(home), 'Claude', 'claude_desktop_config.json'),
@@ -205,6 +205,70 @@ export const junie = defineAgent({
   paths: (home, project) => [join(home, '.junie'), join(project, '.junie')],
 })
 
+export const factory = defineAgent({
+  name: 'Factory Droid',
+  slug: 'factory',
+  paths: (home, project) => [join(home, '.factory'), join(project, '.factory')],
+  versionCommand: 'droid',
+  processNames: ['droid'],
+})
+
+export const pi = defineAgent({
+  name: 'Pi',
+  slug: 'pi',
+  paths: (home, project) => [join(home, '.pi', 'agent'), join(project, '.pi')],
+  versionCommand: 'pi',
+  processNames: ['pi'],
+})
+
+export const kimiCode = defineAgent({
+  name: 'Kimi Code',
+  slug: 'kimi-code',
+  paths: (home, project) => [join(home, '.kimi-code'), join(project, '.kimi-code')],
+  versionCommand: 'kimi',
+  processNames: ['kimi'],
+})
+
+export const hermes = defineAgent({
+  name: 'Hermes Agent',
+  slug: 'hermes',
+  paths: (home) => [join(home, '.hermes')],
+  versionCommand: 'hermes',
+  processNames: ['hermes'],
+})
+
+export const grok = defineAgent({
+  name: 'Grok Build',
+  slug: 'grok',
+  paths: (home) => [join(home, '.grok')],
+  versionCommand: 'grok',
+  processNames: ['grok'],
+})
+
+export const antigravity = defineAgent({
+  name: 'Antigravity',
+  slug: 'antigravity',
+  paths: (home) => [join(home, '.gemini', 'antigravity')],
+  processNames: ['Antigravity'],
+  desktopApp: true,
+})
+
+export const amazonQ = defineAgent({
+  name: 'Amazon Q Developer',
+  slug: 'amazon-q',
+  paths: (home, project) => [join(home, '.aws', 'amazonq'), join(project, '.amazonq')],
+  versionCommand: 'q',
+  processNames: ['q'],
+})
+
+export const vibe = defineAgent({
+  name: 'Mistral Vibe',
+  slug: 'vibe',
+  paths: (home) => [join(home, '.vibe')],
+  versionCommand: 'vibe',
+  processNames: ['vibe'],
+})
+
 export const ALL_AGENTS = [
   claudeCode,
   claudeDesktop,
@@ -226,6 +290,14 @@ export const ALL_AGENTS = [
   trae,
   qwenCode,
   junie,
+  factory,
+  pi,
+  kimiCode,
+  hermes,
+  grok,
+  antigravity,
+  amazonQ,
+  vibe,
 ]
 
 export const AGENT_SLUGS = [
@@ -249,4 +321,12 @@ export const AGENT_SLUGS = [
   'trae',
   'qwen-code',
   'junie',
+  'factory',
+  'pi',
+  'kimi-code',
+  'hermes',
+  'grok',
+  'antigravity',
+  'amazon-q',
+  'vibe',
 ]

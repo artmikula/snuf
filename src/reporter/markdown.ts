@@ -74,6 +74,8 @@ export function renderMarkdown(result: ScanResult, options: ScanOptions, home: s
   section(lines, 'Shell and permissions', findings.filter((f) => f.category === 'shell'), home)
   section(lines, 'File access', findings.filter((f) => f.category === 'file-access'), home)
   section(lines, 'Rules and skills', findings.filter((f) => f.category === 'rules'), home)
+  section(lines, 'Git config', findings.filter((f) => f.category === 'git'), home)
+  section(lines, 'CI workflows', findings.filter((f) => f.category === 'ci'), home)
 
   lines.push('## Recommendations')
   lines.push('')

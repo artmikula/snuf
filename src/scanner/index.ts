@@ -7,6 +7,8 @@ import { scanSecrets } from './secrets.js'
 import { scanPermissions } from './permissions.js'
 import { scanShell } from './shell.js'
 import { scanRules } from './rules.js'
+import { scanGit } from './git.js'
+import { scanCi } from './ci.js'
 import { calculateScore, sortFindings } from '../scoring/risk.js'
 import { VERSION } from '../version.js'
 
@@ -22,8 +24,10 @@ export async function runScan(options: ScanOptions): Promise<ScanResult> {
   const unknownStdio = mcpServers.filter((s) => s.transport === 'stdio' && !s.isKnown).length
   const permFindings = await scanPermissions(ctx, posture, unknownStdio)
   const { findings: ruleFindings } = await scanRules(ctx)
+  const gitFindings = await scanGit(ctx)
+  const ciFindings = await scanCi(ctx)
 
-  const findings = sortFindings([...secretFindings, ...mcpFindings, ...shellFindings, ...permFindings, ...ruleFindings])
+  const findings = sortFindings([...secretFindings, ...mcpFindings, ...shellFindings, ...permFindings, ...ruleFindings, ...gitFindings, ...ciFindings])
 
   return {
     version: VERSION,

@@ -16,12 +16,16 @@ Read only. Zero network calls. No account, no API key, no AI model involved. It 
 
 ## What it checks
 
-- **Agents.** Every AI coding tool installed, its version, and whether it is running right now. Claude Code, Claude Desktop, Cursor, Copilot, Windsurf, Codex CLI, Gemini CLI, Aider, OpenCode, OpenClaw, Cline, Roo Code, Kiro, Amp, Zed, Continue, Goose, Trae, Qwen Code, Junie.
-- **MCP servers.** Every server each agent loads, from the config locations those agents really use, including project scoped entries nested inside `~/.claude.json`, Codex's `config.toml`, and VS Code's `mcp.json`. Which package runs, whether the publisher is recognized, whether it reaches the network, and whether credentials are passed to it.
+- **Agents.** Every AI coding tool installed, its version, and whether it is running right now. Claude Code, Claude Desktop and Cowork, Cursor, Copilot, Windsurf, Codex CLI, Gemini CLI, Antigravity, Aider, OpenCode, OpenClaw, Cline, Roo Code, Kiro, Amp, Zed, Continue, Goose, Trae, Qwen Code, Junie, Factory Droid, Pi, Kimi Code, Hermes Agent, Grok Build, Amazon Q, Mistral Vibe.
+- **MCP servers.** Every server each agent loads, from the config locations those agents really use, including project scoped entries nested inside `~/.claude.json`, Codex's `config.toml`, Hermes' `config.yaml` and VS Code's `mcp.json`. Which package runs, whether the publisher is recognized, whether it reaches the network, and whether credentials are passed to it.
+- **MCP supply chain.** Package names one or two characters off a well known server (the typosquat trick used to plant rogue servers in 2026). Servers installed straight from a git URL. Servers started through `npx` or `uvx` with no pinned version, so a hijacked release reaches you the day it ships.
 - **Secrets.** API keys and tokens in MCP configs, in your exported shell environment, in `.env` files, and in agent state files. Plaintext OAuth credential stores that other processes can read. Values are never printed, only masked.
 - **Shell and permissions.** Claude Code `defaultMode`, `Bash(*)` in allow lists, hooks that run on every session, `enableAllProjectMcpServers`, missing deny rules. Codex `approval_policy` and `sandbox_mode`. Gemini YOLO mode. Whether you are running as root.
 - **File access.** Sessions started with your home directory as the project. SSH keys, cloud credentials, GitHub CLI tokens, npm and PyPI tokens within reach, rated by how easily an agent gets to them without a prompt.
-- **Rules and skills.** `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.cursor/rules`, `SKILL.md` files and slash commands. Flags invisible Unicode, prompt injection phrasing, downloads piped into a shell, and privileged commands.
+- **Rules and skills.** `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `.cursorrules`, `.cursor/rules`, `SKILL.md` files and slash commands. Flags invisible Unicode, prompt injection phrasing, downloads piped into a shell, and privileged commands.
+- **Git config.** The GitSpawn attack: a cloned repo's own `.git/config` can set `core.fsmonitor` to a command, and the moment an agent runs `git status` it executes, before any trust prompt and outside any sandbox. snuf reads the project's `.git/config` for that key and for every other setting that names a program (hooksPath, sshCommand, shell aliases, filters, diff drivers), and tells you if an installed agent is below the patched version.
+- **CI workflows.** Agent actions in `.github/workflows` that run on issue or PR text from strangers, let any GitHub account prompt the agent, hold write permissions or secrets, or float on a tag instead of a commit SHA. The June 2026 Claude Code Action secret leak was this exact shape.
+- **OpenClaw.** Gateway bound beyond localhost, auth turned off, relaxed origin checks, and versions behind the last security release.
 
 ## The report
 
@@ -82,6 +86,19 @@ npx snuf --fail-on high                   # exit 1 for CI when anything high or 
 ```
 
 `--output` infers the format from the extension, so `--output report.json` works without `--format`.
+
+## How it compares
+
+There are good MCP scanners out there. Most look at one thing: a single server's source or tool descriptions, often by connecting to it. snuf answers a different question. It walks the whole machine and every agent on it, and it never connects to anything.
+
+| | snuf | Snyk agent-scan | mcp-audit and friends |
+|---|---|---|---|
+| Scope | Every agent, MCP server, secret, rules file, git config and CI workflow on the machine | MCP servers, skills, agent harnesses | Individual MCP server code or config |
+| Connects to MCP servers | Never | Yes, to read tool descriptions | Depends |
+| Account or token needed | No | Snyk token | No |
+| Runtime | Node, `npx snuf` | Node | Python |
+
+Use them together. snuf tells you what is there and what it can reach. A server scanner tells you whether one specific server is well written.
 
 ## What snuf does not do
 

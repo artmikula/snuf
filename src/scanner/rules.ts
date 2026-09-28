@@ -24,6 +24,14 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
     { path: join(home, '.codex', 'AGENTS.md'), agent: 'codex', scope: 'user' },
     { path: join(home, '.gemini', 'GEMINI.md'), agent: 'gemini-cli', scope: 'user' },
     { path: join(home, '.config', 'opencode', 'AGENTS.md'), agent: 'opencode', scope: 'user' },
+    { path: join(home, '.openclaw', 'workspace', 'SOUL.md'), agent: 'openclaw', scope: 'user' },
+    { path: join(home, '.openclaw', 'workspace', 'AGENTS.md'), agent: 'openclaw', scope: 'user' },
+    { path: join(home, '.openclaw', 'workspace', 'MEMORY.md'), agent: 'openclaw', scope: 'user' },
+    { path: join(home, '.hermes', 'SOUL.md'), agent: 'hermes', scope: 'user' },
+    { path: join(home, '.factory', 'AGENTS.md'), agent: 'factory', scope: 'user' },
+    { path: join(home, '.pi', 'agent', 'AGENTS.md'), agent: 'pi', scope: 'user' },
+    { path: join(home, '.kimi-code', 'AGENTS.md'), agent: 'kimi-code', scope: 'user' },
+    { path: join(home, '.grok', 'GROK.md'), agent: 'grok', scope: 'user' },
     { path: join(project, 'CLAUDE.md'), agent: 'claude-code', scope: 'project' },
     { path: join(project, '.claude', 'CLAUDE.md'), agent: 'claude-code', scope: 'project' },
     { path: join(project, 'CLAUDE.local.md'), agent: 'claude-code', scope: 'project' },
@@ -36,6 +44,8 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
     { path: join(project, '.github', 'copilot-instructions.md'), agent: 'copilot', scope: 'project' },
     { path: join(project, '.junie', 'guidelines.md'), agent: 'junie', scope: 'project' },
     { path: join(project, '.goosehints'), agent: 'goose', scope: 'project' },
+    { path: join(project, 'GROK.md'), agent: 'grok', scope: 'project' },
+    { path: join(project, '.factory', 'AGENTS.md'), agent: 'factory', scope: 'project' },
   ]
   const patterns: Array<[string, string, string, RuleFile['scope']]> = [
     [project, '.cursor/rules/**/*.{mdc,md}', 'cursor', 'project'],
@@ -55,6 +65,13 @@ function ruleFiles(ctx: ScanContext): RuleFile[] {
     [home, '.codex/skills/*/SKILL.md', 'codex', 'user'],
     [home, '.openclaw/skills/*/SKILL.md', 'openclaw', 'user'],
     [home, '.openclaw/workspace/skills/*/SKILL.md', 'openclaw', 'user'],
+    [home, '.factory/droids/**/*.md', 'factory', 'user'],
+    [home, '.factory/commands/**/*.md', 'factory', 'user'],
+    [project, '.factory/droids/**/*.md', 'factory', 'project'],
+    [home, '.grok/skills/*/SKILL.md', 'grok', 'user'],
+    [home, '.pi/agent/skills/*/SKILL.md', 'pi', 'user'],
+    [home, '.hermes/skills/*/SKILL.md', 'hermes', 'user'],
+    [home, '.kimi-code/skills/*/SKILL.md', 'kimi-code', 'user'],
   ]
   const files = fixed.filter((f) => existsSync(f.path) && statSync(f.path).isFile())
   for (const [cwd, pattern, agent, scope] of patterns) {

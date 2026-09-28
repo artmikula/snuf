@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Agent, Finding, ScanContext } from '../types.js'
 import { readJson, readText, parseTomlSubset } from './config-parsers.js'
+import { compareVersions } from './git.js'
 
 export interface ShellPosture {
   unprompted: boolean
@@ -215,6 +216,75 @@ function generic(agent: Agent, severity: Finding['severity'], detail: string): F
   return { category: 'shell', severity, title: `${agent.name} can run shell commands`, detail, agent: agent.slug }
 }
 
+const OPENCLAW_MIN_SAFE = '2026.8.1'
+
+function openclaw(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const path = join(ctx.home, '.openclaw', 'openclaw.json')
+  const short = path.replace(ctx.home, '~')
+  const findings: Finding[] = []
+  const config = rec(readJson(path))
+  const gateway = rec(config?.['gateway'])
+  const auth = rec(gateway?.['auth'])
+  const bind = typeof gateway?.['bind'] === 'string' ? (gateway['bind'] as string) : 'loopback'
+  const authMode = typeof auth?.['mode'] === 'string' ? (auth['mode'] as string) : undefined
+  const hasSecret = typeof auth?.['token'] === 'string' || typeof auth?.['password'] === 'string' || Boolean(process.env['OPENCLAW_GATEWAY_TOKEN']) || Boolean(process.env['OPENCLAW_GATEWAY_PASSWORD'])
+  const exposed = bind !== 'loopback'
+  const noAuth = authMode === 'none' || (exposed && !hasSecret && authMode !== 'trusted-proxy' && authMode !== 'password' && authMode !== 'token')
+
+  if (exposed && noAuth) {
+    posture.unprompted = true
+    posture.reasons.push('OpenClaw gateway is reachable from the network without authentication')
+    findings.push({ category: 'shell', severity: 'critical', title: 'OpenClaw gateway is on the network with no authentication', detail: `${short} sets gateway.bind to "${bind}" and no working auth. Anyone who can reach this port gets an agent that runs shell commands as you. Tens of thousands of instances were found exposed like this in 2026. Set gateway.bind to "loopback" or turn on token auth.`, path, agent: agent.slug })
+  } else if (exposed) {
+    findings.push({ category: 'shell', severity: 'high', title: `OpenClaw gateway listens beyond localhost (${bind})`, detail: `${short} sets gateway.bind to "${bind}". Auth is on, but the gateway has had remote code execution bugs this year, so every host on that network is one CVE away from your shell. Bind to loopback unless you need remote access.`, path, agent: agent.slug })
+  } else if (authMode === 'none') {
+    findings.push({ category: 'shell', severity: 'medium', title: 'OpenClaw gateway auth is disabled', detail: `${short} sets gateway.auth.mode to "none". It is only on loopback, but any local process or a browser tab that reaches localhost can drive the agent. CVE-2026-25253 was exactly this path.`, path, agent: agent.slug })
+  }
+
+  const controlUi = rec(config?.['controlUi'])
+  const dangerous = ['dangerouslyAllowHostHeaderOriginFallback', 'allowExternalEmbedUrls'].filter((k) => controlUi?.[k] === true)
+  if (dangerous.length > 0) {
+    findings.push({ category: 'shell', severity: 'medium', title: `OpenClaw control UI has ${dangerous.join(' and ')} enabled`, detail: `${short} relaxes the origin checks that stopped the one click remote code execution bug. Turn these off unless a reverse proxy depends on them.`, path, agent: agent.slug })
+  }
+
+  if (agent.version && compareVersions(agent.version, OPENCLAW_MIN_SAFE) < 0) {
+    findings.push({ category: 'shell', severity: 'high', title: `OpenClaw v${agent.version} is behind the last security release`, detail: `Two high severity fixes shipped in ${OPENCLAW_MIN_SAFE} and the project has logged more than 500 CVEs in 2026. Update before running it against anything you care about.`, agent: agent.slug })
+  }
+
+  findings.push(generic(agent, 'medium', 'OpenClaw executes skills and tools as a long running process with your user permissions. Review installed skills under ~/.openclaw.'))
+  return findings
+}
+
+function factory(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const files = [
+    join(ctx.home, '.factory', 'settings.json'),
+    join(ctx.home, '.factory', 'settings.local.json'),
+    join(ctx.project, '.factory', 'settings.local.json'),
+  ].filter((p) => existsSync(p))
+  const findings: Finding[] = []
+  for (const path of files) {
+    const settings = rec(readJson(path))
+    if (!settings) continue
+    const short = path.replace(ctx.home, '~')
+    const level = rec(settings['sessionDefaultSettings'])?.['autonomyLevel']
+    if (level === 'high') {
+      posture.unprompted = true
+      posture.reasons.push(`Factory Droid autonomyLevel is high in ${short}`)
+      findings.push({ category: 'shell', severity: 'high', title: 'Factory Droid starts every session at full autonomy', detail: `${short} sets sessionDefaultSettings.autonomyLevel to "high". Commands outside the blocklist run without confirmation.`, path, agent: agent.slug })
+    } else if (level === 'medium') {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Factory Droid auto runs most commands', detail: `${short} sets autonomyLevel to "medium". Only commands on the denylist stop for confirmation.`, path, agent: agent.slug })
+    }
+    const allow = strArr(settings['commandAllowlist'])
+    const risky = allow.filter((r) => /curl|wget|sudo|rm |chmod|ssh|scp|eval|bash -c|sh -c|npm publish|git push|\*/.test(r))
+    if (risky.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: `Factory Droid pre approves ${risky.length} risky command pattern${risky.length > 1 ? 's' : ''}`, detail: `${short} commandAllowlist: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'info', 'Factory Droid starts with autonomy off and asks before commands.'))
+  return findings
+}
+
+
 export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]; posture: ShellPosture }> {
   const posture: ShellPosture = { unprompted: false, reasons: [] }
   const findings: Finding[] = []
@@ -241,13 +311,20 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
       case 'kiro':
       case 'trae':
       case 'zed':
+      case 'antigravity':
         findings.push(generic(agent, 'low', `${agent.name} has an integrated terminal and an auto run setting stored in its app state, which snuf cannot read. Check the agent settings for auto run or turbo mode.`))
         break
       case 'aider':
         findings.push(generic(agent, 'low', 'Aider runs lint and test commands automatically when configured with auto-lint or auto-test.'))
         break
       case 'openclaw':
-        findings.push(generic(agent, 'medium', 'OpenClaw executes skills and tools as a long running process with your user permissions. Review installed skills under ~/.openclaw.'))
+        findings.push(...openclaw(agent, ctx, posture))
+        break
+      case 'factory':
+        findings.push(...factory(agent, ctx, posture))
+        break
+      case 'hermes':
+        findings.push(generic(agent, 'medium', 'Hermes Agent runs as a long lived process with shell, browser and messaging tools. Secrets live in ~/.hermes/.env, which every tool it runs can read.'))
         break
       case 'claude-desktop':
         break

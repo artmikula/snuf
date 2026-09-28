@@ -26,6 +26,12 @@ export function recommendations(result: ScanResult): string[] {
   const recs: string[] = []
   const has = (pred: (f: Finding) => boolean) => result.findings.some(pred)
 
+  if (has((f) => f.category === 'git' && f.title.includes('GitSpawn') && f.severity === 'critical')) {
+    recs.push('Delete core.fsmonitor from this repo\'s .git/config before opening it with any agent. It runs on every git status.')
+  }
+  if (has((f) => f.category === 'git' && f.title.includes('vulnerable to GitSpawn'))) {
+    recs.push('Update the agents flagged for GitSpawn. Until then inspect .git/config in every repo you clone.')
+  }
   if (has((f) => f.category === 'secret' && f.title.includes('MCP config'))) {
     recs.push('Move credentials out of MCP config files. Reference them by name (${VAR}) or use the agent keychain.')
   }
@@ -38,6 +44,12 @@ export function recommendations(result: ScanResult): string[] {
   const unknown = result.mcpServers.filter((s) => s.transport === 'stdio' && !s.isKnown)
   if (unknown.length > 0) {
     recs.push(`Review ${unknown.length} unrecognized MCP server${unknown.length > 1 ? 's' : ''}: ${unknown.slice(0, 4).map((s) => s.name).join(', ')}${unknown.length > 4 ? ', ...' : ''}`)
+  }
+  if (has((f) => f.category === 'mcp' && f.title.includes('typosquat'))) {
+    recs.push('Remove the MCP server whose package name looks like a typosquat and rotate anything it had in env.')
+  }
+  if (has((f) => f.category === 'ci' && f.severity === 'high')) {
+    recs.push('Lock down the CI workflow that lets any GitHub account prompt your agent. Gate on the actor and drop write permissions.')
   }
   if (has((f) => f.category === 'file-access' && f.title.includes('home directory'))) {
     recs.push('Start agents inside a repository, never from your home directory.')

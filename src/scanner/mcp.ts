@@ -205,44 +205,63 @@ function zedSettings(path: string): RawServer[] {
   return servers
 }
 
-function gooseConfig(path: string): RawServer[] {
-  const text = readText(path)
-  if (text === undefined) return []
-  const servers: RawServer[] = []
-  let current: RawServer | undefined
-  let inEnvs = false
-  for (const rawLine of text.split('\n')) {
-    const indent = rawLine.search(/\S/)
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#')) continue
-    if (indent === 2 && line.endsWith(':')) {
-      current = { name: line.slice(0, -1), env: {} }
-      servers.push(current)
-      inEnvs = false
-      continue
-    }
-    if (!current) continue
-    if (indent === 4) {
-      inEnvs = line === 'envs:'
-      const m = line.match(/^(cmd|uri|url):\s*(.+)$/)
-      if (m) {
-        const value = m[2]!.replace(/^["']|["']$/g, '')
-        if (m[1] === 'cmd') current.command = value
-        else current.url = value
-      }
-      const argsMatch = line.match(/^args:\s*\[(.*)\]$/)
-      if (argsMatch) {
-        current.args = argsMatch[1]!.split(',').map((a) => a.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
-      }
-      continue
-    }
-    if (indent === 6 && inEnvs) {
-      const m = line.match(/^([^:]+):\s*(.*)$/)
-      if (m && current.env) current.env[m[1]!.trim()] = m[2]!.replace(/^["']|["']$/g, '')
-    }
-  }
-  return servers.filter((s) => s.command || s.url)
+interface YamlShape {
+  section?: string
+  commandKeys: string[]
+  urlKeys: string[]
+  envKey: string
 }
+
+function yamlServers(shape: YamlShape) {
+  return (path: string): RawServer[] => {
+    const text = readText(path)
+    if (text === undefined) return []
+    const servers: RawServer[] = []
+    let current: RawServer | undefined
+    let inEnvs = false
+    let inSection = shape.section === undefined
+    for (const rawLine of text.split('\n')) {
+      const indent = rawLine.search(/\S/)
+      const line = rawLine.trim()
+      if (!line || line.startsWith('#')) continue
+      if (indent === 0) {
+        inSection = shape.section === undefined || line === `${shape.section}:`
+        current = undefined
+        continue
+      }
+      if (!inSection) continue
+      if (indent === 2 && line.endsWith(':')) {
+        current = { name: line.slice(0, -1), env: {} }
+        servers.push(current)
+        inEnvs = false
+        continue
+      }
+      if (!current) continue
+      if (indent === 4) {
+        inEnvs = line === `${shape.envKey}:`
+        const m = line.match(/^([a-z_]+):\s*(.+)$/)
+        if (m) {
+          const value = m[2]!.replace(/^["']|["']$/g, '')
+          if (shape.commandKeys.includes(m[1]!)) current.command = value
+          else if (shape.urlKeys.includes(m[1]!)) current.url = value
+        }
+        const argsMatch = line.match(/^args:\s*\[(.*)\]$/)
+        if (argsMatch) {
+          current.args = argsMatch[1]!.split(',').map((a) => a.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+        }
+        continue
+      }
+      if (indent === 6 && inEnvs) {
+        const m = line.match(/^([^:]+):\s*(.*)$/)
+        if (m && current.env) current.env[m[1]!.trim()] = m[2]!.replace(/^["']|["']$/g, '')
+      }
+    }
+    return servers.filter((s) => s.command || s.url)
+  }
+}
+
+const gooseConfig = yamlServers({ section: 'extensions', commandKeys: ['cmd'], urlKeys: ['uri', 'url'], envKey: 'envs' })
+const hermesConfig = yamlServers({ section: 'mcp_servers', commandKeys: ['command'], urlKeys: ['url'], envKey: 'env' })
 
 function appSupport(home: string): string {
   if (process.platform === 'darwin') return join(home, 'Library', 'Application Support')
@@ -296,7 +315,14 @@ export function mcpConfigSources(home: string, project: string): ConfigSource[] 
     { path: join(project, '.junie', 'mcp', 'mcp.json'), agent: 'junie', label: 'project .junie/mcp/mcp.json', parse: mcpServers },
     { path: join(appSupport(home), 'Trae', 'mcp.json'), agent: 'trae', label: 'Trae', parse: mcpServers },
     { path: join(project, '.trae', 'mcp.json'), agent: 'trae', label: 'project .trae/mcp.json', parse: mcpServers },
-    { path: join(home, '.factory', 'mcp.json'), agent: 'factory', label: 'Factory Droid', parse: mcpServers },
+    { path: join(home, '.factory', 'mcp.json'), agent: 'factory', label: '~/.factory/mcp.json', parse: mcpServers },
+    { path: join(project, '.factory', 'mcp.json'), agent: 'factory', label: 'project .factory/mcp.json', parse: mcpServers },
+    { path: join(home, '.pi', 'agent', 'mcp.json'), agent: 'pi', label: '~/.pi/agent/mcp.json', parse: mcpServers },
+    { path: join(project, '.pi', 'mcp.json'), agent: 'pi', label: 'project .pi/mcp.json', parse: mcpServers },
+    { path: join(home, '.kimi-code', 'mcp.json'), agent: 'kimi-code', label: '~/.kimi-code/mcp.json', parse: mcpServers },
+    { path: join(project, '.kimi-code', 'mcp.json'), agent: 'kimi-code', label: 'project .kimi-code/mcp.json', parse: mcpServers },
+    { path: join(home, '.hermes', 'config.yaml'), agent: 'hermes', label: '~/.hermes/config.yaml', parse: hermesConfig },
+    { path: join(home, '.grok', 'config.toml'), agent: 'grok', label: '~/.grok/config.toml', parse: tomlServers },
     { path: join(home, '.qwen', 'settings.json'), agent: 'qwen-code', label: '~/.qwen/settings.json', parse: mcpServers },
     { path: join(project, '.qwen', 'settings.json'), agent: 'qwen-code', label: 'project .qwen/settings.json', parse: mcpServers },
     { path: join(home, '.aws', 'amazonq', 'mcp.json'), agent: 'amazon-q', label: 'Amazon Q', parse: mcpServers },
@@ -325,8 +351,93 @@ function packageName(command: string | undefined, args: string[] | undefined): s
   return undefined
 }
 
+
+const WELL_KNOWN = [
+  '@modelcontextprotocol/server-filesystem',
+  '@modelcontextprotocol/server-github',
+  '@modelcontextprotocol/server-memory',
+  '@modelcontextprotocol/server-fetch',
+  '@modelcontextprotocol/server-puppeteer',
+  '@modelcontextprotocol/server-sequential-thinking',
+  '@modelcontextprotocol/server-everything',
+  '@modelcontextprotocol/server-brave-search',
+  '@modelcontextprotocol/server-postgres',
+  '@modelcontextprotocol/server-sqlite',
+  '@modelcontextprotocol/server-slack',
+  '@modelcontextprotocol/server-google-maps',
+  '@modelcontextprotocol/inspector',
+  '@playwright/mcp',
+  '@upstash/context7-mcp',
+  '@anthropic-ai/claude-code',
+  '@openai/codex',
+  '@google/gemini-cli',
+  'mcp-remote',
+  'firecrawl-mcp',
+  'tavily-mcp',
+  'chrome-devtools-mcp',
+  'exa-mcp-server',
+  'mcp-server-fetch',
+  'mcp-server-git',
+  'mcp-server-time',
+  'mcp-server-sqlite',
+  'github-mcp-server',
+]
+
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0]!
+    prev[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j]!
+      prev[j] = Math.min(prev[j]! + 1, prev[j - 1]! + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1))
+      diag = tmp
+    }
+  }
+  return prev[b.length]!
+}
+
+export function lookalikeOf(pkg: string): string | undefined {
+  const lower = pkg.toLowerCase()
+  if (WELL_KNOWN.includes(lower) || TRUSTED_PACKAGES.has(lower) || TRUSTED_SCOPES.some((s) => lower.startsWith(s))) return undefined
+  for (const known of WELL_KNOWN) {
+    if (editDistance(lower, known) <= 2) return known
+  }
+  const scope = lower.match(/^(@[^/]+\/)/)?.[1]
+  if (scope) {
+    for (const trusted of TRUSTED_SCOPES) {
+      if (scope !== trusted && editDistance(scope, trusted) <= 2) return `${trusted}*`
+    }
+  }
+  return undefined
+}
+
+function rawPackageArg(command: string | undefined, args: string[] | undefined): string | undefined {
+  const base = command?.split(/[\\/]/).at(-1)?.toLowerCase()
+  if (!base || !args) return undefined
+  if (!['npx', 'bunx', 'pnpx', 'uvx', 'pipx', 'pnpm', 'yarn'].includes(base)) return undefined
+  return args.filter((a) => !a.startsWith('-') && a !== 'dlx' && a !== 'exec' && a !== 'run')[0]
+}
+
+function isPinned(command: string | undefined, args: string[] | undefined): boolean | undefined {
+  const raw = rawPackageArg(command, args)
+  if (!raw) return undefined
+  const version = raw.replace(/^@[^/]+\//, '').split('@')[1]
+  if (!version) return false
+  return /^\d/.test(version) && !/^[\^~]/.test(version)
+}
+
+function fromGitSource(command: string | undefined, args: string[] | undefined): string | undefined {
+  const all = [command ?? '', ...(args ?? [])]
+  return all.find((a) => /^(git\+|github:|gitlab:|bitbucket:)|github\.com\/[^/]+\/[^/]+(\.git|\/)?$|\.git(#|$)/i.test(a))
+}
+
+const VENDOR_BUNDLES = /\/(ChatGPT|Codex|Codex Computer Use|Claude|Cursor|Windsurf|Kiro|Antigravity|Trae)\.app\//i
+
 function isTrusted(command: string | undefined, args: string[] | undefined, url: string | undefined): boolean {
   if (url && !command) return true
+  if (command && VENDOR_BUNDLES.test(command)) return true
   const pkg = packageName(command, args)
   if (!pkg) return false
   if (TRUSTED_PACKAGES.has(pkg)) return true
@@ -422,6 +533,30 @@ function findingsFor(server: McpServer, path: string): Finding[] {
       })
     }
   }
+  if (pkg) {
+    const lookalike = lookalikeOf(pkg)
+    if (lookalike) {
+      findings.push({
+        category: 'mcp',
+        severity: 'high',
+        title: `MCP server package looks like a typosquat: ${server.name}`,
+        detail: `"${pkg}" is one or two characters away from "${lookalike}" and is not that package. Typosquatted MCP packages were used in the 2026 Sandworm_Mode campaign to plant servers that phone home and inject tool definitions. Source: ${server.source}`,
+        path,
+        agent: server.agent,
+      })
+    }
+  }
+  const gitSource = fromGitSource(server.command, server.args)
+  if (server.transport === 'stdio' && gitSource) {
+    findings.push({
+      category: 'mcp',
+      severity: 'medium',
+      title: `MCP server installs straight from a git repository: ${server.name}`,
+      detail: `${gitSource.slice(0, 80)} is fetched and executed at launch with no registry, no version, and no audit trail. Whoever controls that repo controls what runs on your machine next time the agent starts. Source: ${server.source}`,
+      path,
+      agent: server.agent,
+    })
+  }
   if (server.transport === 'http' && server.url && server.url.startsWith('http://') && !/localhost|127\.0\.0\.1|\[::1\]/.test(server.url)) {
     findings.push({
       category: 'mcp',
@@ -451,6 +586,17 @@ export async function scanMcpServers(
       servers.push(server)
       findings.push(...findingsFor(server, source.path))
     }
+  }
+
+  const unpinned = servers.filter((s) => s.transport === 'stdio' && isPinned(s.command, s.args) === false)
+  if (unpinned.length > 0) {
+    const unknown = unpinned.filter((s) => !s.isKnown)
+    findings.push({
+      category: 'mcp',
+      severity: unknown.length > 0 ? 'medium' : 'info',
+      title: `${unpinned.length} MCP server${unpinned.length > 1 ? 's' : ''} run${unpinned.length > 1 ? '' : 's'} whatever version is latest at launch`,
+      detail: `${unpinned.slice(0, 5).map((s) => s.name).join(', ')}${unpinned.length > 5 ? ` and ${unpinned.length - 5} more` : ''} are started through npx or uvx without a pinned version. Every agent start resolves the newest publish, so a hijacked or rug pulled package (the Deadbugz pattern: behave for three calls, then hunt for SSH keys) reaches you the same day. Pin versions: npx -y pkg@1.2.3.`,
+    })
   }
 
   return { servers, findings }

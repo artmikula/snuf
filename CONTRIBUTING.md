@@ -18,7 +18,8 @@ pnpm build && node dist/cli.js
 2. Add it to `ALL_AGENTS` and `AGENT_SLUGS`.
 3. If it loads MCP servers, add its config file to `mcpConfigSources` in `src/scanner/mcp.ts`. Reuse `jsonKey('mcpServers')` where the format is standard.
 4. If it has a permission or approval setting on disk, add a case in `src/scanner/shell.ts`.
-5. Add a test under `tests/` using the sandbox helper. Tests write to a temp directory and never touch your real home.
+5. If it was named in a published vulnerability with a fix version, add it to the patch table in `src/scanner/git.ts` (or a new table next to it).
+6. Add a test under `tests/` using the sandbox helper. Tests write to a temp directory and never touch your real home.
 
 ## Rules
 

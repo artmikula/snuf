@@ -80,6 +80,8 @@ export function renderTerminal(result: ScanResult, options: ScanOptions, home: s
   block(`📁 File access`, findings.filter((f) => f.category === 'file-access'), home, out)
   block(`🔌 MCP findings`, findings.filter((f) => f.category === 'mcp'), home, out)
   block(`📜 Rules and skills`, findings.filter((f) => f.category === 'rules'), home, out)
+  block(`🌱 Git config`, findings.filter((f) => f.category === 'git'), home, out)
+  block(`⚙️  CI workflows`, findings.filter((f) => f.category === 'ci'), home, out)
 
   if (findings.length === 0) {
     out.push(chalk.gray(options.severity ? `No findings at ${options.severity} or above.` : 'No findings.'))

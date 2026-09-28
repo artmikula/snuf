@@ -56,3 +56,37 @@ describe('scanShell', () => {
     expect(findings[0]!.severity).toBe('high')
   })
 })
+
+describe('scanShell openclaw and factory', () => {
+  it('flags an exposed unauthenticated OpenClaw gateway as critical', async () => {
+    box = sandbox()
+    box.write('home/.openclaw/openclaw.json', JSON.stringify({ gateway: { bind: 'lan', auth: { mode: 'none' } } }))
+    const { findings, posture } = await scanShell(box.ctx([agent('openclaw', 'OpenClaw')]))
+    expect(findings.find((f) => f.title.includes('no authentication'))?.severity).toBe('critical')
+    expect(posture.unprompted).toBe(true)
+  })
+
+  it('rates loopback with auth none as medium and old versions as high', async () => {
+    box = sandbox()
+    box.write('home/.openclaw/openclaw.json', JSON.stringify({ gateway: { bind: 'loopback', auth: { mode: 'none' } } }))
+    const { findings } = await scanShell(box.ctx([{ ...agent('openclaw', 'OpenClaw'), version: '2026.3.11' }]))
+    expect(findings.find((f) => f.title.includes('auth is disabled'))?.severity).toBe('medium')
+    expect(findings.find((f) => f.title.includes('behind the last security release'))?.severity).toBe('high')
+  })
+
+  it('is quiet for a default loopback token OpenClaw', async () => {
+    box = sandbox()
+    box.write('home/.openclaw/openclaw.json', JSON.stringify({ gateway: { bind: 'loopback', auth: { mode: 'token', token: 'abc' } } }))
+    const { findings } = await scanShell(box.ctx([{ ...agent('openclaw', 'OpenClaw'), version: '2026.9.1' }]))
+    expect(findings.filter((f) => f.severity !== 'medium')).toEqual([])
+  })
+
+  it('reads Factory Droid autonomy level', async () => {
+    box = sandbox()
+    box.write('home/.factory/settings.json', JSON.stringify({ sessionDefaultSettings: { autonomyLevel: 'high' }, commandAllowlist: ['git status', 'curl *'] }))
+    const { findings, posture } = await scanShell(box.ctx([agent('factory', 'Factory Droid')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.find((f) => f.title.includes('full autonomy'))?.severity).toBe('high')
+    expect(findings.find((f) => f.title.includes('risky command'))?.detail).toContain('curl *')
+  })
+})
