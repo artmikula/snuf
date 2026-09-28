@@ -11,7 +11,17 @@ describe('scanShell', () => {
     box.write('home/.claude/settings.json', JSON.stringify({ permissions: { deny: ['Read(./.env)'] } }))
     const { findings, posture } = await scanShell(box.ctx([agent('claude-code')]))
     expect(posture.unprompted).toBe(false)
-    expect(findings.some((f) => f.title.includes('prompts before'))).toBe(true)
+    expect(findings.some((f) => f.title.includes('likely runs in auto mode'))).toBe(true)
+  })
+
+  it('treats pinned auto mode as low and disableAutoMode as prompts intact', async () => {
+    box = sandbox()
+    box.write('home/.claude/settings.json', JSON.stringify({ permissions: { defaultMode: 'auto', deny: ['Read(./.env)'] } }))
+    const auto = await scanShell(box.ctx([agent('claude-code')]))
+    expect(auto.findings.find((f) => f.title.includes('runs in auto mode'))?.severity).toBe('low')
+    box.write('home/.claude/settings.json', JSON.stringify({ permissions: { disableAutoMode: 'disable', deny: ['Read(./.env)'] } }))
+    const manual = await scanShell(box.ctx([agent('claude-code')]))
+    expect(manual.findings.find((f) => f.title.includes('prompts before'))?.severity).toBe('info')
   })
 
   it('flags bypassPermissions as high and marks posture unprompted', async () => {

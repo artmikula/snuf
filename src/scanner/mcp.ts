@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import fg from 'fast-glob'
 import { join } from 'node:path'
 import type { McpServer, Finding, ScanContext } from '../types.js'
 import { readJson, readText, parseTomlSubset } from './config-parsers.js'
@@ -278,6 +279,16 @@ function vscodeUser(home: string): string {
     : join(appSupport(home), 'Code', 'User')
 }
 
+function windowsStoreClaude(home: string): string[] {
+  if (process.platform !== 'win32') return []
+  const local = process.env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local')
+  try {
+    return fg.sync('Packages/Claude_*/LocalCache/Roaming/Claude/claude_desktop_config.json', { cwd: local, absolute: true, suppressErrors: true })
+  } catch {
+    return []
+  }
+}
+
 export function mcpConfigSources(home: string, project: string): ConfigSource[] {
   const mcpServers = jsonKey('mcpServers')
   const vscodeStyle = jsonKey('servers')
@@ -287,6 +298,7 @@ export function mcpConfigSources(home: string, project: string): ConfigSource[] 
     { path: join(project, '.mcp.json'), agent: 'claude-code', label: 'project .mcp.json', parse: mcpServers },
     { path: join(appSupport(home), 'Claude', 'claude_desktop_config.json'), agent: 'claude-desktop', label: 'Claude Desktop', parse: mcpServers },
     { path: join(home, '.config', 'Claude', 'claude_desktop_config.json'), agent: 'claude-desktop', label: 'Claude Desktop', parse: mcpServers },
+    ...windowsStoreClaude(home).map((path) => ({ path, agent: 'claude-desktop', label: 'Claude Desktop (Store install)', parse: mcpServers })),
     { path: join(home, '.cursor', 'mcp.json'), agent: 'cursor', label: '~/.cursor/mcp.json', parse: mcpServers },
     { path: join(project, '.cursor', 'mcp.json'), agent: 'cursor', label: 'project .cursor/mcp.json', parse: mcpServers },
     { path: join(home, '.codeium', 'windsurf', 'mcp_config.json'), agent: 'windsurf', label: 'Windsurf', parse: mcpServers },

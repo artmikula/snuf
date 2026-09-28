@@ -86,6 +86,15 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
         path,
         agent: agent.slug,
       })
+    } else if (mode === 'auto') {
+      findings.push({
+        category: 'shell',
+        severity: 'low',
+        title: 'Claude Code runs in auto mode',
+        detail: `${short} pins permissions.defaultMode to "auto". A classifier approves or blocks each action instead of you. Anthropic says it does not remove prompt injection risk. Set permissions.disableAutoMode to "disable" to force manual approval.`,
+        path,
+        agent: agent.slug,
+      })
     } else if (mode === 'acceptEdits') {
       findings.push({
         category: 'shell',
@@ -182,11 +191,14 @@ function claudeCode(agent: Agent, ctx: ScanContext, posture: ShellPosture): Find
   }
 
   if (promptsIntact && findings.every((f) => f.severity === 'info' || f.severity === 'low')) {
+    const autoDisabled = files.some((p) => rec(rec(readJson(p))?.['permissions'])?.['disableAutoMode'] === 'disable')
     findings.push({
       category: 'shell',
-      severity: 'info',
-      title: 'Claude Code prompts before running commands',
-      detail: 'Default permission mode is active. Shell commands outside the allow list ask first.',
+      severity: autoDisabled ? 'info' : 'low',
+      title: autoDisabled ? 'Claude Code prompts before running commands' : 'Claude Code likely runs in auto mode (the default since 2026-08-14)',
+      detail: autoDisabled
+        ? 'Auto mode is disabled in settings, so shell commands outside the allow list ask first.'
+        : 'No defaultMode is pinned. On Pro, Max and Team plans Claude Code now starts in auto mode, where a classifier approves actions instead of you. Pin permissions.defaultMode to "default" or set permissions.disableAutoMode to "disable" if you want the prompt back.',
       agent: agent.slug,
     })
   }
