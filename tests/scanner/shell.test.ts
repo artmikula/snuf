@@ -171,7 +171,7 @@ describe('scanShell gemini trusted folders', () => {
     box = sandbox()
     box.write('home/.gemini/trustedFolders.json', JSON.stringify({ [box.project]: 'TRUST_FOLDER' }))
     const { findings } = await scanShell(box.ctx([agent('gemini-cli', 'Gemini CLI')]))
-    expect(findings.map((f) => f.severity)).toEqual(['info'])
+    expect(findings.filter((f) => !f.title.includes('stopped serving')).map((f) => f.severity)).toEqual(['info'])
   })
 })
 
@@ -285,5 +285,22 @@ describe('scanShell amp, goose, copilot', () => {
     const { findings } = await scanShell(box.ctx([agent('copilot', 'GitHub Copilot')]))
     expect(findings[0]!.severity).toBe('high')
     expect(findings[0]!.detail).not.toContain(box.project + ',')
+  })
+})
+
+describe('scanShell antigravity', () => {
+  it('reads the IDE autoExecutionPolicy and permission grants', async () => {
+    box = sandbox()
+    box.write('home/.gemini/config/config.json', JSON.stringify({ userSettings: { autoExecutionPolicy: 'Always Proceed', enableTerminalSandbox: false, nonWorkspaceFileAccessPolicy: 'Always Proceed' } }))
+    const { findings, posture } = await scanShell(box.ctx([agent('antigravity', 'Antigravity')]))
+    expect(posture.unprompted).toBe(true)
+    expect(findings.map((f) => f.severity).sort()).toEqual(['high', 'medium'])
+  })
+
+  it('downgrades to medium when the terminal sandbox is on', async () => {
+    box = sandbox()
+    box.write('home/.gemini/antigravity-cli/settings.json', JSON.stringify({ enableTerminalSandbox: true, permissions: { allow: ['command'] } }))
+    const { findings } = await scanShell(box.ctx([agent('antigravity-cli', 'Antigravity CLI')]))
+    expect(findings[0]!.severity).toBe('medium')
   })
 })

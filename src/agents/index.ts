@@ -249,9 +249,17 @@ export const grok = defineAgent({
 export const antigravity = defineAgent({
   name: 'Antigravity',
   slug: 'antigravity',
-  paths: (home) => [join(home, '.gemini', 'antigravity')],
+  paths: (home) => [join(home, '.gemini', 'antigravity'), join(home, '.gemini', 'config', 'config.json')],
   processNames: ['Antigravity'],
   desktopApp: true,
+})
+
+export const antigravityCli = defineAgent({
+  name: 'Antigravity CLI',
+  slug: 'antigravity-cli',
+  paths: (home) => [join(home, '.gemini', 'antigravity-cli')],
+  versionCommand: 'agy',
+  processNames: ['agy'],
 })
 
 export const amazonQ = defineAgent({
@@ -297,6 +305,7 @@ export const ALL_AGENTS = [
   hermes,
   grok,
   antigravity,
+  antigravityCli,
   amazonQ,
   vibe,
 ]
@@ -328,6 +337,7 @@ export const AGENT_SLUGS = [
   'hermes',
   'grok',
   'antigravity',
+  'antigravity-cli',
   'amazon-q',
   'vibe',
 ]

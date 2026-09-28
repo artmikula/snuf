@@ -287,6 +287,7 @@ function gemini(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[
   } else if (findings.length === 0) {
     findings.push({ category: 'shell', severity: 'info', title: 'Gemini CLI prompts before running commands', detail: 'No auto accept or yolo settings found.', agent: agent.slug })
   }
+  findings.push({ category: 'shell', severity: 'info', title: 'Gemini CLI stopped serving non enterprise users on 2026-06-18', detail: 'Google replaced it with Antigravity CLI (~/.gemini/antigravity-cli). If this install still works you are on a Gemini Code Assist licence; otherwise the config here is dead weight and any MCP credentials in it should be moved or deleted.', agent: agent.slug })
   return findings
 }
 
@@ -547,6 +548,60 @@ function copilot(agent: Agent, ctx: ScanContext): Finding[] {
   return [generic(agent, 'low', 'Copilot CLI asks per tool unless started with --allow-tool or --allow-all-tools. Trusted folders live in ~/.copilot/config.json.')]
 }
 
+function antigravity(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const path = join(ctx.home, '.gemini', 'config', 'config.json')
+  const user = rec(rec(readJson(path))?.['userSettings'])
+  const findings: Finding[] = []
+  if (user) {
+    const short = path.replace(ctx.home, '~')
+    const policy = user['autoExecutionPolicy']
+    const sandboxed = user['enableTerminalSandbox'] === true
+    if (policy === 'Always Proceed') {
+      posture.unprompted = true
+      posture.reasons.push('Antigravity autoExecutionPolicy is Always Proceed')
+      findings.push({ category: 'shell', severity: sandboxed ? 'medium' : 'high', title: 'Antigravity runs terminal commands without review', detail: `${short} sets autoExecutionPolicy to "Always Proceed". Everything outside the denylist runs immediately${sandboxed ? ', inside the terminal sandbox' : ' and enableTerminalSandbox is off'}.`, path, agent: agent.slug })
+    }
+    const allow = strArr(rec(user['globalPermissionGrants'])?.['allow'])
+    const commandAll = allow.filter((r) => /^command(:\*|\(\*\))?$/.test(r.trim()))
+    if (commandAll.length > 0 && policy !== 'Always Proceed') {
+      posture.unprompted = true
+      posture.reasons.push('Antigravity globalPermissionGrants allow every command')
+      findings.push({ category: 'shell', severity: 'high', title: 'Antigravity pre approves every command', detail: `${short} globalPermissionGrants.allow contains "${commandAll[0]}".`, path, agent: agent.slug })
+    }
+    if (user['nonWorkspaceFileAccessPolicy'] === 'Always Proceed' || user['nonWorkspaceFileAccessPolicy'] === true) {
+      findings.push({ category: 'shell', severity: 'medium', title: 'Antigravity reads and writes outside the workspace without asking', detail: `${short} sets nonWorkspaceFileAccessPolicy to allow. Files anywhere in your home directory are fair game.`, path, agent: agent.slug })
+    }
+    if (findings.length === 0 && sandboxed) {
+      findings.push({ category: 'shell', severity: 'info', title: 'Antigravity terminal sandbox is on', detail: `${short} sets enableTerminalSandbox.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Antigravity asks before terminal commands by default (Request Review). Its policy lives in ~/.gemini/config/config.json under userSettings.'))
+  return findings
+}
+
+function antigravityCli(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
+  const path = join(ctx.home, '.gemini', 'antigravity-cli', 'settings.json')
+  const settings = rec(readJson(path))
+  const findings: Finding[] = []
+  if (settings) {
+    const short = path.replace(ctx.home, '~')
+    const allow = strArr(rec(settings['permissions'])?.['allow'])
+    const commandAll = allow.filter((r) => /^command(\(\*?\))?$/.test(r.trim()))
+    const risky = allow.filter((r) => /command\([^)]*(curl|wget|sudo|rm|chmod|ssh|scp|eval|bash|sh|npm publish|git push)/.test(r))
+    if (commandAll.length > 0) {
+      posture.unprompted = true
+      posture.reasons.push(`Antigravity CLI allows every command in ${short}`)
+      findings.push({ category: 'shell', severity: settings['enableTerminalSandbox'] === true ? 'medium' : 'high', title: 'Antigravity CLI pre approves every command', detail: `${short} permissions.allow contains "${commandAll[0]}"${settings['enableTerminalSandbox'] === true ? ' (terminal sandbox is on)' : ' and enableTerminalSandbox is off'}.`, path, agent: agent.slug })
+    } else if (risky.length > 0) {
+      findings.push({ category: 'shell', severity: 'medium', title: `Antigravity CLI pre approves ${risky.length} risky command pattern${risky.length > 1 ? 's' : ''}`, detail: `${short}: ${risky.slice(0, 6).join(', ')}`, path, agent: agent.slug })
+    } else if (settings['enableTerminalSandbox'] === true) {
+      findings.push({ category: 'shell', severity: 'info', title: 'Antigravity CLI terminal sandbox is on', detail: `${short} sets enableTerminalSandbox.`, path, agent: agent.slug })
+    }
+  }
+  if (findings.length === 0) findings.push(generic(agent, 'low', 'Antigravity CLI asks before commands by default and its terminal sandbox is off unless enableTerminalSandbox is set in ~/.gemini/antigravity-cli/settings.json.'))
+  return findings
+}
+
 function grok(agent: Agent, ctx: ScanContext, posture: ShellPosture): Finding[] {
   const files = [join(ctx.home, '.grok', 'config.toml'), join(ctx.project, '.grok', 'config.toml')].filter((p) => existsSync(p))
   const findings: Finding[] = []
@@ -701,10 +756,15 @@ export async function scanShell(ctx: ScanContext): Promise<{ findings: Finding[]
       case 'copilot':
         findings.push(...copilot(agent, ctx))
         break
+      case 'antigravity':
+        findings.push(...antigravity(agent, ctx, posture))
+        break
+      case 'antigravity-cli':
+        findings.push(...antigravityCli(agent, ctx, posture))
+        break
       case 'windsurf':
       case 'trae':
       case 'zed':
-      case 'antigravity':
         findings.push(generic(agent, 'low', `${agent.name} has an integrated terminal and an auto run setting stored in its app state, which snuf cannot read. Check the agent settings for auto run or turbo mode.`))
         break
       case 'aider':

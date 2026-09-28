@@ -300,6 +300,7 @@ export function mcpConfigSources(home: string, project: string): ConfigSource[] 
     { path: join(home, '.gemini', 'settings.json'), agent: 'gemini-cli', label: '~/.gemini/settings.json', parse: mcpServers },
     { path: join(project, '.gemini', 'settings.json'), agent: 'gemini-cli', label: 'project .gemini/settings.json', parse: mcpServers },
     { path: join(home, '.gemini', 'antigravity', 'mcp_config.json'), agent: 'antigravity', label: 'Antigravity', parse: mcpServers },
+    { path: join(home, '.gemini', 'antigravity-cli', 'settings.json'), agent: 'antigravity-cli', label: '~/.gemini/antigravity-cli/settings.json', parse: mcpServers },
     { path: join(home, '.config', 'opencode', 'opencode.json'), agent: 'opencode', label: '~/.config/opencode/opencode.json', parse: jsonKey('mcp') },
     { path: join(project, 'opencode.json'), agent: 'opencode', label: 'project opencode.json', parse: jsonKey('mcp') },
     { path: join(home, '.openclaw', 'openclaw.json'), agent: 'openclaw', label: '~/.openclaw/openclaw.json', parse: mcpServers },
