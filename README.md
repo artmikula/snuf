@@ -82,6 +82,7 @@ npx snuf --agent claude-code              # one agent only
 npx snuf --project ~/work/app             # scan another project directory
 npx snuf --format markdown --output snuf-report.md
 npx snuf --format json                    # machine readable, values masked
+npx snuf --format sarif --output snuf.sarif   # for GitHub code scanning and other SARIF consumers
 npx snuf --fail-on high                   # exit 1 for CI when anything high or critical is found
 ```
 
@@ -104,7 +105,7 @@ Use them together. snuf tells you what is there and what it can reach. A server 
 
 - **No network calls.** Nothing is sent anywhere. Check the source, it is small.
 - **No writes.** The only file snuf ever creates is the one you name with `--output`.
-- **No secrets in output.** Values are masked to a prefix, a suffix, and a length, even in JSON.
+- **No secrets in output.** Values are masked to a prefix, a suffix, and a length, even in JSON and SARIF.
 - **No AI.** Static checks only. It runs in well under a second.
 
 Windows support is best effort. Config paths are checked, but process detection and version lookups are limited.
@@ -123,12 +124,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npx snuf --fail-on high --format markdown --output snuf-report.md
-      - uses: actions/upload-artifact@v4
+      - run: npx snuf --format sarif --output snuf.sarif
+      - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          name: snuf-report
-          path: snuf-report.md
+          sarif_file: snuf.sarif
+      - run: npx snuf --fail-on high --quick
 ```
 
 In CI the useful findings are the project scoped ones: `.mcp.json` and `.cursor/mcp.json` with inline credentials, rules files that arrived in a PR, `.git/config` keys that name a program, and agent workflows that accept prompts from anyone.

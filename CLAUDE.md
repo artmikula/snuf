@@ -203,6 +203,7 @@ npx snuf
 npx snuf --format json
 npx snuf --format markdown
 npx snuf --format terminal  # default
+npx snuf --format sarif     # GitHub code scanning
 
 # Scan specific agent only
 npx snuf --agent claude-code
